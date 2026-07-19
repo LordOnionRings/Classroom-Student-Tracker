@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Classroom Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#f4f5f7; --panel:#ffffff; --ink:#1f2430; --muted:#6b7280; --line:#e3e5ea;
+    --accent:#2f6fed; --accent-ink:#ffffff; --good:#2f9e5f; --warn:#c2410c; --bad:#c0392b;
+    --radius:14px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none;}
+  html,body{height:100%;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-touch-callout:none;
+  }
+  #app{max-width:1100px; margin:0 auto; padding:16px 16px 80px;}
+  h1,h2,h3{margin:0 0 4px;}
+  .row{display:flex; align-items:center; gap:10px;}
+  .row.between{justify-content:space-between;}
+  .row.wrap{flex-wrap:wrap;}
+  .muted{color:var(--muted); font-size:13px;}
+  .topbar{display:flex; align-items:center; justify-content:space-between; padding:10px 0 16px;}
+  .topbar .title{font-size:20px; font-weight:700;}
+  .btn{
+    appearance:none; border:none; border-radius:10px; padding:12px 18px; font-size:15px; font-weight:600;
+    background:var(--panel); color:var(--ink); border:1px solid var(--line); cursor:pointer;
+  }
+  .btn:active{transform:scale(0.97);}
+  .btn.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent);}
+  .btn.ghost{background:transparent; border-color:transparent; color:var(--accent); padding:8px 10px;}
+  .btn.danger{background:#fff; color:var(--bad); border-color:#f1c2be;}
+  .btn.small{padding:8px 12px; font-size:13px; border-radius:8px;}
+  .btn.block{width:100%;}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:16px; margin-bottom:12px;}
+  .card.clickable{cursor:pointer;}
+  .card.clickable:active{transform:scale(0.995);}
+  .grid-cards{display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px;}
+  input[type=text], textarea, select{
+    width:100%; padding:12px; border-radius:10px; border:1px solid var(--line); font-size:15px; background:#fff; color:var(--ink);
+  }
+  textarea{resize:vertical; min-height:64px;}
+  label{font-size:13px; color:var(--muted); display:block; margin-bottom:4px;}
+  .field{margin-bottom:12px;}
+  .tabs{display:flex; gap:6px; border-bottom:1px solid var(--line); margin-bottom:16px;}
+  .tab{padding:10px 16px; font-weight:600; color:var(--muted); cursor:pointer; border-bottom:3px solid transparent;}
+  .tab.active{color:var(--accent); border-color:var(--accent);}
+  .session-banner{
+    display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-radius:12px;
+    background:#eef3ff; border:1px solid #cfe0ff; margin-bottom:14px; font-size:14px;
+  }
+  .session-banner.closed{background:#f1f2f4; border-color:var(--line);}
+  .student-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:12px;}
+  .student-btn{
+    background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px 10px;
+    min-height:96px; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:8px; cursor:pointer; text-align:center; position:relative;
+  }
+  .student-btn:active{transform:scale(0.96); background:#eef3ff;}
+  .student-avatar{
+    width:44px; height:44px; border-radius:50%; background:var(--accent); color:#fff; font-weight:700;
+    display:flex; align-items:center; justify-content:center; font-size:16px;
+  }
+  .student-name{font-weight:600; font-size:14px;}
+  .event-badge{
+    position:absolute; top:8px; right:8px; background:var(--ink); color:#fff; font-size:11px; font-weight:700;
+    border-radius:10px; padding:2px 7px;
+  }
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(20,22,30,0.5); display:flex; align-items:flex-end; justify-content:center;
+    z-index:50;
+  }
+  @media(min-width:640px){ .modal-backdrop{align-items:center;} }
+  .modal{
+    background:#fff; width:100%; max-width:520px; max-height:88vh; overflow-y:auto; border-radius:18px 18px 0 0;
+    padding:20px; animation:up .15s ease-out;
+  }
+  @media(min-width:640px){ .modal{border-radius:18px;} }
+  @keyframes up{from{transform:translateY(24px); opacity:0;} to{transform:translateY(0); opacity:1;}}
+  .modal-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
+  .cat-btn{
+    display:block; width:100%; text-align:left; padding:16px; border-radius:12px; border:1px solid var(--line);
+    background:#fafbfc; font-size:16px; font-weight:600; margin-bottom:10px; cursor:pointer;
+  }
+  .cat-btn:active{transform:scale(0.98);}
+  .cat-btn .tag{display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:20px; margin-left:8px; vertical-align:middle;}
+  .tag.neutral{background:#e7e9ee; color:#4b5563;}
+  .tag.negative{background:#fbe4e1; color:var(--bad);}
+  .tag.positive{background:#e2f5e9; color:var(--good);}
+  .chip{
+    display:inline-flex; padding:9px 14px; border-radius:20px; border:1px solid var(--line); background:#fff;
+    font-size:14px; font-weight:600; cursor:pointer; margin:0 8px 8px 0;
+  }
+  .chip.selected{background:var(--accent); color:#fff; border-color:var(--accent);}
+  .toast-root{position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:100; display:flex; flex-direction:column; gap:8px; align-items:center;}
+  .toast{background:var(--ink); color:#fff; padding:10px 18px; border-radius:30px; font-size:14px; font-weight:600; box-shadow:0 6px 20px rgba(0,0,0,0.2); animation:fade .25s ease-out;}
+  .toast.good{background:var(--good);}
+  @keyframes fade{from{opacity:0; transform:translateY(-8px);} to{opacity:1; transform:translateY(0);}}
+  table.pivot{border-collapse:collapse; width:100%; font-size:13px;}
+  table.pivot th, table.pivot td{border:1px solid var(--line); padding:8px 10px; text-align:center; white-space:nowrap;}
+  table.pivot th.rowlabel, table.pivot td.rowlabel{text-align:left; position:sticky; left:0; background:#fff; font-weight:600;}
+  table.pivot th{background:#f7f8fa;}
+  .scroll-x{overflow-x:auto; border:1px solid var(--line); border-radius:12px;}
+  .badge-never{background:#fff4e5; color:var(--warn); font-size:11px; font-weight:700; padding:2px 8px; border-radius:20px;}
+  .badge-recent{background:#eee; color:var(--muted); font-size:11px; font-weight:700; padding:2px 8px; border-radius:20px;}
+  .empty{padding:40px 20px; text-align:center; color:var(--muted);}
+  .footer-actions{position:sticky; bottom:0; background:linear-gradient(to top, var(--bg) 60%, transparent); padding:14px 0 4px; margin-top:10px;}
+  .icon-btn{background:transparent; border:none; color:var(--muted); font-size:20px; cursor:pointer; padding:4px 8px;}
+  a.link{color:var(--accent); font-weight:600; text-decoration:none;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast-root" class="toast-root"></div>
+
+<script>
+/* ============ CONFIG: EVENT TAXONOMY ============ */
+const TAXONOMY = [
+  { key:'shares_idea', label:'Shares Idea', polarity:'neutral',
+    subtypes:[
+      {key:'good_answer', label:'Good Answer'},
+      {key:'creative', label:'Creative'},
+      {key:'poor_logic', label:'Poor Logic'},
+      {key:'off_topic', label:'Off-Topic'}
+    ]},
+  { key:'arrives_late', label:'Arrives Late', polarity:'negative', subtypes:null },
+  { key:'sleeping', label:'Sleeping', polarity:'negative', subtypes:null },
+  { key:'not_doing_work', label:'Not Doing Work', polarity:'negative', subtypes:null },
+  { key:'disruptive', label:'Disruptive', polarity:'negative',
+    subtypes:[
+      {key:'chatting', label:'Chatting with Others'},
+      {key:'making_noise', label:'Making Noise'},
+      {key:'fiddling', label:'Fiddling'},
+      {key:'other', label:'Other'}
+    ]},
+  { key:'unprepared', label:'Unprepared for Class', polarity:'negative',
+    subtypes:[
+      {key:'no_materials', label:'No Materials'},
+      {key:'forgot_homework', label:'Forgot Homework'},
+      {key:'forgot_device', label:'Forgot Device'}
+    ]}
+];
+const REASON_TAGS = ['Great Insight','Helped a Classmate','Improved Effort','Strong Focus','Creative Thinking','Kindness'];
+const NO_ENTRIES_KEY = 'no_entries';
+const STUDENT_OF_CLASS_KEY = 'student_of_class';
+
+function catLabel(catKey){
+  if(catKey === NO_ENTRIES_KEY) return 'No Entries Logged';
+  if(catKey === STUDENT_OF_CLASS_KEY) return 'Student of the Class';
+  const c = TAXONOMY.find(t=>t.key===catKey);
+  return c ? c.label : catKey;
+}
+function subLabel(catKey, subKey){
+  if(!subKey) return null;
+  const c = TAXONOMY.find(t=>t.key===catKey);
+  const s = c && c.subtypes ? c.subtypes.find(x=>x.key===subKey) : null;
+  return s ? s.label : subKey;
+}
+function rowLabel(catKey, subKey){
+  const cl = catLabel(catKey);
+  const sl = subLabel(catKey, subKey);
+  return sl ? (cl + ' - ' + sl) : cl;
+}
+
+/* ============ UTIL ============ */
+function uuid(){
+  if(crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{
+    const r = Math.random()*16|0, v = c==='x'?r:(r&0x3|0x8); return v.toString(16);
+  });
+}
+function todayStr(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function formatDateNice(dstr){
+  const [y,m,d] = dstr.split('-').map(Number);
+  const dt = new Date(y, m-1, d);
+  return dt.toLocaleDateString(undefined,{month:'short', day:'numeric', year:'numeric'});
+}
+function initials(name){
+  return name.trim().split(/\s+/).map(p=>p[0]).slice(0,2).join('').toUpperCase();
+}
+function escapeHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function sanitizeSheetName(name){
+  let n = String(name).replace(/[\\\/\?\*\[\]:]/g,' ').trim();
+  if(n.length>31) n = n.slice(0,31);
+  if(n.length===0) n = 'Sheet';
+  return n;
+}
+function toast(msg, kind){
+  const root = document.getElementById('toast-root');
+  const el = document.createElement('div');
+  el.className = 'toast' + (kind ? ' '+kind : '');
+  el.textContent = msg;
+  root.appendChild(el);
+  setTimeout(()=>{ el.remove(); }, 1600);
+}
+
+/* ============ INDEXEDDB LAYER ============ */
+const DB_NAME = 'classroomTrackerDB';
+const DB_VERSION = 1;
+let dbPromise = null;
+
+function openDB(){
+  if(dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject)=>{
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e)=>{
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains('classes')){
+        db.createObjectStore('classes', {keyPath:'id'});
+      }
+      if(!db.objectStoreNames.contains('students')){
+        const s = db.createObjectStore('students', {keyPath:'id'});
+        s.createIndex('classId','classId',{unique:false});
+      }
+      if(!db.objectStoreNames.contains('sessions')){
+        const s = db.createObjectStore('sessions', {keyPath:'id'});
+        s.createIndex('classId','classId',{unique:false});
+      }
+      if(!db.objectStoreNames.contains('events')){
+        const s = db.createObjectStore('events', {keyPath:'id'});
+        s.createIndex('sessionId','sessionId',{unique:false});
+        s.createIndex('studentId','studentId',{unique:false});
+        s.createIndex('classId','classId',{unique:false});
+      }
+    };
+    req.onsuccess = (e)=> resolve(e.target.result);
+    req.onerror = (e)=> reject(e.target.error);
+  });
+  return dbPromise;
+}
+async function dbAdd(store, obj){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(store,'readwrite');
+    tx.objectStore(store).add(obj);
+    tx.oncomplete = ()=>resolve(obj);
+    tx.onerror = (e)=>reject(e.target.error);
+  });
+}
+async function dbPut(store, obj){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(store,'readwrite');
+    tx.objectStore(store).put(obj);
+    tx.oncomplete = ()=>resolve(obj);
+    tx.onerror = (e)=>reject(e.target.error);
+  });
+}
+async function dbGet(store, id){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(store,'readonly');
+    const req = tx.objectStore(store).get(id);
+    req.onsuccess = ()=>resolve(req.result || null);
+    req.onerror = (e)=>reject(e.target.error);
+  });
+}
+async function dbGetAll(store){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(store,'readonly');
+    const req = tx.objectStore(store).getAll();
+    req.onsuccess = ()=>resolve(req.result || []);
+    req.onerror = (e)=>reject(e.target.error);
+  });
+}
+async function dbGetAllByIndex(store, indexName, value){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(store,'readonly');
+    const req = tx.objectStore(store).index(indexName).getAll(value);
+    req.onsuccess = ()=>resolve(req.result || []);
+    req.onerror = (e)=>reject(e.target.error);
+  });
+}
+async function dbDelete(store, id){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(store,'readwrite');
+    tx.objectStore(store).delete(id);
+    tx.oncomplete = ()=>resolve();
+    tx.onerror = (e)=>reject(e.target.error);
+  });
+}
+
+/* ============ APP STATE ============ */
+const state = {
+  view:'classList',          // classList | roster | classHome
+  currentClassId:null,
+  activeTab:'log',           // log | data
+  dataSelectedStudentId:null,
+  dataView:'student',        // student | classSummary
+  openSessionCache:null      // {id,date,status,...} for current class's open/today session (read-only lookup)
+};
+
+/* ============ SESSION LOGIC ============ */
+// Read-only lookup: does a session for today already exist for this class? Does NOT create one.
+async function findTodaySession(classId){
+  const sessions = await dbGetAllByIndex('sessions','classId', classId);
+  const today = todayStr();
+  const todays = sessions.filter(s=>s.date===today);
+  // prefer an open one if present, else most recently created closed one (for banner display only)
+  const open = todays.find(s=>s.status==='open');
+  if(open) return open;
+  if(todays.length){
+    return todays.sort((a,b)=>b.createdAt-a.createdAt)[0];
+  }
+  return null;
+}
+// Called only at the moment of the FIRST actual log action of the day.
+async function getOrCreateOpenTodaySession(classId){
+  const existing = await findTodaySession(classId);
+  if(existing && existing.status==='open') return existing;
+  const s = {
+    id: uuid(), classId, date: todayStr(), status:'open',
+    studentOfClassId:null, studentOfClassReason:null,
+    createdAt: Date.now(), closedAt:null
+  };
+  await dbAdd('sessions', s);
+  return s;
+}
+
+/* ============ RENDER ROOT ============ */
+async function render(){
+  const app = document.getElementById('app');
+  if(state.view === 'classList'){
+    app.innerHTML = await renderClassList();
+    wireClassList();
+  } else if(state.view === 'roster'){
+    app.innerHTML = await renderRoster();
+    wireRoster();
+  } else if(state.view === 'classHome'){
+    app.innerHTML = await renderClassHome();
+    wireClassHome();
+  }
+}
+
+/* ============ VIEW: CLASS LIST ============ */
+async function renderClassList(){
+  const classes = (await dbGetAll('classes')).sort((a,b)=>a.name.localeCompare(b.name));
+  let cardsHtml = '';
+  if(classes.length===0){
+    cardsHtml = `<div class="empty">No classes yet. Add your first class to get started.</div>`;
+  } else {
+    for(const c of classes){
+      const students = await dbGetAllByIndex('students','classId', c.id);
+      const activeCount = students.filter(s=>s.active!==false).length;
+      cardsHtml += `
+        <div class="card clickable" data-open-class="${c.id}">
+          <h3>${escapeHtml(c.name)}</h3>
+          <div class="muted">${activeCount} student${activeCount===1?'':'s'}</div>
+        </div>`;
+    }
+  }
+  return `
+    <div class="topbar">
+      <div class="title">Classroom Tracker</div>
+    </div>
+    <div class="card">
+      <label>New class name</label>
+      <div class="row">
+        <input type="text" id="new-class-name" placeholder="e.g. G7">
+        <button class="btn primary" id="add-class-btn">Add Class</button>
+      </div>
+    </div>
+    <div class="grid-cards">${cardsHtml}</div>
+  `;
+}
+function wireClassList(){
+  document.getElementById('add-class-btn').addEventListener('click', async ()=>{
+    const input = document.getElementById('new-class-name');
+    const name = input.value.trim();
+    if(!name){ toast('Enter a class name'); return; }
+    const cls = { id:uuid(), name, createdAt:Date.now() };
+    await dbAdd('classes', cls);
+    state.currentClassId = cls.id;
+    state.view = 'roster';
+    render();
+  });
+  document.querySelectorAll('[data-open-class]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      state.currentClassId = el.getAttribute('data-open-class');
+      state.view = 'classHome';
+      state.activeTab = 'log';
+      render();
+    });
+  });
+}
+
+/* ============ VIEW: ROSTER EDITOR ============ */
+async function renderRoster(){
+  const cls = await dbGet('classes', state.currentClassId);
+  const students = (await dbGetAllByIndex('students','classId', state.currentClassId))
+    .sort((a,b)=>a.name.localeCompare(b.name));
+  let rowsHtml = students.map(s=>`
+    <div class="row between card" style="padding:10px 14px; margin-bottom:8px;">
+      <div class="row">
+        <div class="student-avatar" style="width:32px;height:32px;font-size:12px;">${escapeHtml(initials(s.name))}</div>
+        <div>${escapeHtml(s.name)}${s.active===false?' <span class="muted">(inactive)</span>':''}</div>
+      </div>
+      <div class="row">
+        <button class="btn small" data-toggle-student="${s.id}">${s.active===false?'Reactivate':'Deactivate'}</button>
+      </div>
+    </div>
+  `).join('');
+  return `
+    <div class="topbar">
+      <button class="btn ghost" id="back-to-list">&larr; All Classes</button>
+    </div>
+    <h2>${escapeHtml(cls ? cls.name : '')} Roster</h2>
+    <div class="muted" style="margin-bottom:14px;">Deactivated students are hidden from live logging but kept in historical data.</div>
+    <div class="card">
+      <label>Add student</label>
+      <div class="row">
+        <input type="text" id="new-student-name" placeholder="Student name">
+        <button class="btn primary" id="add-student-btn">Add</button>
+      </div>
+    </div>
+    ${rowsHtml || '<div class="empty">No students yet.</div>'}
+    <div class="footer-actions">
+      <button class="btn primary block" id="done-roster-btn">Done &mdash; Go to Class</button>
+    </div>
+  `;
+}
+function wireRoster(){
+  document.getElementById('back-to-list').addEventListener('click', ()=>{
+    state.view='classList'; render();
+  });
+  document.getElementById('add-student-btn').addEventListener('click', async ()=>{
+    const input = document.getElementById('new-student-name');
+    const name = input.value.trim();
+    if(!name){ toast('Enter a student name'); return; }
+    await dbAdd('students', { id:uuid(), classId:state.currentClassId, name, active:true, createdAt:Date.now() });
+    render();
+  });
+  document.querySelectorAll('[data-toggle-student]').forEach(el=>{
+    el.addEventListener('click', async ()=>{
+      const id = el.getAttribute('data-toggle-student');
+      const s = await dbGet('students', id);
+      s.active = s.active===false ? true : false;
+      await dbPut('students', s);
+      render();
+    });
+  });
+  document.getElementById('done-roster-btn').addEventListener('click', ()=>{
+    state.view='classHome'; state.activeTab='log'; render();
+  });
+}
+
+/* ============ VIEW: CLASS HOME (LOG / DATA TABS) ============ */
+async function renderClassHome(){
+  const cls = await dbGet('classes', state.currentClassId);
+  const todaySession = await findTodaySession(state.currentClassId);
+  const tabsHtml = `
+    <div class="tabs">
+      <div class="tab ${state.activeTab==='log'?'active':''}" data-tab="log">Log</div>
+      <div class="tab ${state.activeTab==='data'?'active':''}" data-tab="data">Data</div>
+    </div>`;
+  const body = state.activeTab==='log'
+    ? await renderLogTab(todaySession)
+    : await renderDataTab();
+  return `
+    <div class="topbar">
+      <button class="btn ghost" id="back-to-list">&larr; All Classes</button>
+      <div class="row">
+        <button class="btn small" id="edit-roster-btn">Edit Roster</button>
+      </div>
+    </div>
+    <h2>${escapeHtml(cls ? cls.name : '')}</h2>
+    ${tabsHtml}
+    ${body}
+  `;
+}
+function wireClassHome(){
+  document.getElementById('back-to-list').addEventListener('click', ()=>{
+    state.view='classList'; render();
+  });
+  document.getElementById('edit-roster-btn').addEventListener('click', ()=>{
+    state.view='roster'; render();
+  });
+  document.querySelectorAll('[data-tab]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      state.activeTab = el.getAttribute('data-tab');
+      render();
+    });
+  });
+  wireLogTabEvents();
+  wireDataTabEvents();
+}
+
+/* ============ LOG TAB ============ */
+async function renderLogTab(todaySession){
+  const students = (await dbGetAllByIndex('students','classId', state.currentClassId))
+    .filter(s=>s.active!==false)
+    .sort((a,b)=>a.name.localeCompare(b.name));
+
+  let eventCounts = {};
+  if(todaySession){
+    const events = await dbGetAllByIndex('events','sessionId', todaySession.id);
+    events.forEach(e=>{
+      if(e.category===NO_ENTRIES_KEY) return;
+      eventCounts[e.studentId] = (eventCounts[e.studentId]||0)+1;
+    });
+  }
+
+  let banner;
+  if(!todaySession){
+    banner = `<div class="session-banner">
+      <div><strong>No session started today.</strong> Tap a student to log something, or submit now if there's nothing to log.</div>
+      <button class="btn danger small" id="end-class-btn">Submit Day (Nothing to Log)</button>
+    </div>`;
+  } else if(todaySession.status==='open'){
+    banner = `<div class="session-banner">
+      <div><strong>Session open</strong> &middot; ${formatDateNice(todaySession.date)}</div>
+      <button class="btn danger small" id="end-class-btn">End Class</button>
+    </div>`;
+  } else {
+    const closedTime = new Date(todaySession.closedAt).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+    banner = `<div class="session-banner closed">
+      <div><strong>Today's class was already submitted</strong> at ${closedTime}. Tap any student below to log a new, separate session for today (e.g. a second period with this class).</div>
+    </div>`;
+  }
+
+  if(students.length===0){
+    return banner + `<div class="empty">No active students in this class. Add students from Edit Roster.</div>`;
+  }
+
+  const gridHtml = students.map(s=>`
+    <div class="student-btn" data-log-student="${s.id}">
+      ${eventCounts[s.id] ? `<div class="event-badge">${eventCounts[s.id]}</div>` : ''}
+      <div class="student-avatar">${escapeHtml(initials(s.name))}</div>
+      <div class="student-name">${escapeHtml(s.name)}</div>
+    </div>
+  `).join('');
+
+  return `${banner}<div class="student-grid">${gridHtml}</div>`;
+}
+
+function wireLogTabEvents(){
+  const endBtn = document.getElementById('end-class-btn');
+  if(endBtn){
+    endBtn.addEventListener('click', ()=> openEndOfClassModal());
+  }
+  document.querySelectorAll('[data-log-student]').forEach(el=>{
+    el.addEventListener('click', async ()=>{
+      const studentId = el.getAttribute('data-log-student');
+      const student = await dbGet('students', studentId);
+      openEventModal(student);
+    });
+  });
+}
+
+/* ---- Event logging modal ---- */
+function openEventModal(student, categoryKey){
+  const category = categoryKey ? TAXONOMY.find(t=>t.key===categoryKey) : null;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'event-modal-backdrop';
+
+  let bodyHtml;
+  if(!category){
+    bodyHtml = TAXONOMY.map(t=>`
+      <button class="cat-btn" data-cat="${t.key}">
+        ${escapeHtml(t.label)}
+        <span class="tag ${t.polarity}">${t.polarity}</span>
+      </button>
+    `).join('');
+  } else {
+    bodyHtml = category.subtypes.map(st=>`
+      <button class="cat-btn" data-sub="${st.key}">${escapeHtml(st.label)}</button>
+    `).join('') + `<button class="btn ghost" id="back-to-cats">&larr; Back</button>`;
+  }
+
+  backdrop.innerHTML = `
+    <div class="modal">
+      <div class="modal-header">
+        <h3>${escapeHtml(student.name)}${category?(' &mdash; '+escapeHtml(category.label)):''}</h3>
+        <button class="icon-btn" id="close-event-modal">&times;</button>
+      </div>
+      ${bodyHtml}
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+
+  document.getElementById('close-event-modal').addEventListener('click', ()=>backdrop.remove());
+  backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) backdrop.remove(); });
+
+  if(!category){
+    backdrop.querySelectorAll('[data-cat]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const key = el.getAttribute('data-cat');
+        const cat = TAXONOMY.find(t=>t.key===key);
+        backdrop.remove();
+        if(cat.subtypes){
+          openEventModal(student, key);
+        } else {
+          logEvent(student, key, null);
+        }
+      });
+    });
+  } else {
+    backdrop.querySelectorAll('[data-sub]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const subKey = el.getAttribute('data-sub');
+        backdrop.remove();
+        logEvent(student, category.key, subKey);
+      });
+    });
+    document.getElementById('back-to-cats').addEventListener('click', ()=>{
+      backdrop.remove();
+      openEventModal(student, null);
+    });
+  }
+}
+
+async function logEvent(student, categoryKey, subKey){
+  const session = await getOrCreateOpenTodaySession(state.currentClassId);
+  const ev = {
+    id: uuid(), sessionId: session.id, classId: state.currentClassId, studentId: student.id,
+    category: categoryKey, subtype: subKey || null, note:null, timestamp: Date.now()
+  };
+  await dbAdd('events', ev);
+  toast(`${student.name}: ${rowLabel(categoryKey, subKey)}`, 'good');
+  render();
+}
+
+/* ---- End of Class flow ---- */
+async function openEndOfClassModal(){
+  let session = await findTodaySession(state.currentClassId);
+  if(session && session.status==='closed'){ toast('Today has already been submitted'); return; }
+  if(!session){
+    // Nothing was tapped today — create today's session now so it can still be
+    // submitted with a full "no entries" record for every student.
+    session = await getOrCreateOpenTodaySession(state.currentClassId);
+  }
+
+  const students = (await dbGetAllByIndex('students','classId', state.currentClassId))
+    .filter(s=>s.active!==false).sort((a,b)=>a.name.localeCompare(b.name));
+
+  // compute "last won" recency for nudge
+  const allSessions = (await dbGetAllByIndex('sessions','classId', state.currentClassId))
+    .filter(s=>s.status==='closed' && s.studentOfClassId)
+    .sort((a,b)=>b.closedAt - a.closedAt);
+
+  const winInfo = {};
+  students.forEach(s=>{
+    const idx = allSessions.findIndex(sess=>sess.studentOfClassId===s.id);
+    winInfo[s.id] = idx === -1 ? {never:true} : {sessionsAgo: idx};
+  });
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'eoc-modal-backdrop';
+
+  const studentOptionsHtml = students.map(s=>{
+    const w = winInfo[s.id];
+    const badge = w.never
+      ? `<span class="badge-never">never picked</span>`
+      : (w.sessionsAgo===0 ? `<span class="badge-recent">picked last time</span>` : `<span class="badge-recent">${w.sessionsAgo} sessions ago</span>`);
+    return `
+      <button class="cat-btn" data-pick-student="${s.id}" style="display:flex; align-items:center; justify-content:space-between;">
+        <span>${escapeHtml(s.name)}</span>
+        ${badge}
+      </button>`;
+  }).join('');
+
+  backdrop.innerHTML = `
+    <div class="modal">
+      <div class="modal-header">
+        <h3>End of Class</h3>
+        <button class="icon-btn" id="close-eoc-modal">&times;</button>
+      </div>
+      <div id="eoc-step-pick">
+        <div class="muted" style="margin-bottom:10px;">Pick today's Student of the Class. Students who haven't been picked recently are worth a second look.</div>
+        ${studentOptionsHtml}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  document.getElementById('close-eoc-modal').addEventListener('click', ()=>backdrop.remove());
+
+  backdrop.querySelectorAll('[data-pick-student]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const studentId = el.getAttribute('data-pick-student');
+      const student = students.find(s=>s.id===studentId);
+      renderEocReasonStep(backdrop, session, students, student);
+    });
+  });
+}
+
+function renderEocReasonStep(backdrop, session, students, student){
+  const stepEl = backdrop.querySelector('.modal');
+  stepEl.innerHTML = `
+    <div class="modal-header">
+      <h3>Why ${escapeHtml(student.name)}?</h3>
+      <button class="icon-btn" id="close-eoc-modal2">&times;</button>
+    </div>
+    <div class="field">
+      <label>Quick tags (optional)</label>
+      <div id="reason-tags">${REASON_TAGS.map(t=>`<span class="chip" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</span>`).join('')}</div>
+    </div>
+    <div class="field">
+      <label>Add your own note (optional)</label>
+      <textarea id="reason-text" placeholder="What did they do?"></textarea>
+    </div>
+    <button class="btn primary block" id="confirm-eoc-btn">Confirm &amp; Submit Class</button>
+  `;
+  backdrop.querySelector('#close-eoc-modal2').addEventListener('click', ()=>backdrop.remove());
+
+  let selectedTag = null;
+  stepEl.querySelectorAll('[data-tag]').forEach(chip=>{
+    chip.addEventListener('click', ()=>{
+      const tag = chip.getAttribute('data-tag');
+      if(selectedTag===tag){
+        selectedTag = null; chip.classList.remove('selected');
+      } else {
+        stepEl.querySelectorAll('[data-tag]').forEach(c=>c.classList.remove('selected'));
+        selectedTag = tag; chip.classList.add('selected');
+      }
+    });
+  });
+
+  stepEl.querySelector('#confirm-eoc-btn').addEventListener('click', async ()=>{
+    const freeText = stepEl.querySelector('#reason-text').value.trim();
+    const reason = [selectedTag, freeText].filter(Boolean).join(' — ');
+    await finalizeSession(session, students, student.id, reason);
+    backdrop.remove();
+  });
+}
+
+async function finalizeSession(session, students, studentOfClassId, reason){
+  // 1. fill no_entries for students with zero events this session
+  const events = await dbGetAllByIndex('events','sessionId', session.id);
+  const touchedIds = new Set(events.map(e=>e.studentId));
+  for(const s of students){
+    if(!touchedIds.has(s.id)){
+      await dbAdd('events', {
+        id: uuid(), sessionId: session.id, classId: state.currentClassId, studentId: s.id,
+        category: NO_ENTRIES_KEY, subtype:null, note:null, timestamp: Date.now()
+      });
+    }
+  }
+  // 2. student of the class event
+  await dbAdd('events', {
+    id: uuid(), sessionId: session.id, classId: state.currentClassId, studentId: studentOfClassId,
+    category: STUDENT_OF_CLASS_KEY, subtype:null, note: reason || null, timestamp: Date.now()
+  });
+  // 3. close session
+  session.status = 'closed';
+  session.studentOfClassId = studentOfClassId;
+  session.studentOfClassReason = reason || null;
+  session.closedAt = Date.now();
+  await dbPut('sessions', session);
+
+  toast('Class submitted. Exporting backup...', 'good');
+  await exportClassToExcel(state.currentClassId, {silent:false});
+  render();
+}
+
+/* ============ DATA TAB ============ */
+async function renderDataTab(){
+  const students = (await dbGetAllByIndex('students','classId', state.currentClassId))
+    .sort((a,b)=>a.name.localeCompare(b.name));
+  if(students.length===0) return `<div class="empty">No students yet.</div>`;
+
+  const subTabsHtml = `
+    <div class="row" style="margin-bottom:14px;">
+      <button class="btn small ${state.dataView==='student'?'primary':''}" data-dataview="student">Per Student</button>
+      <button class="btn small ${state.dataView==='classSummary'?'primary':''}" data-dataview="classSummary">Whole Class</button>
+      <span style="flex:1"></span>
+      <button class="btn small" id="export-now-btn">Export Excel</button>
+    </div>`;
+
+  if(state.dataView==='classSummary'){
+    return subTabsHtml + await renderClassSummaryPivot(students);
+  }
+
+  if(!state.dataSelectedStudentId || !students.find(s=>s.id===state.dataSelectedStudentId)){
+    state.dataSelectedStudentId = students[0].id;
+  }
+  const selectHtml = `
+    <select id="student-select" style="max-width:280px; margin-bottom:14px;">
+      ${students.map(s=>`<option value="${s.id}" ${s.id===state.dataSelectedStudentId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}
+    </select>`;
+
+  const pivotHtml = await renderStudentPivot(state.dataSelectedStudentId);
+  return subTabsHtml + selectHtml + pivotHtml;
+}
+
+function allRowKeys(){
+  // returns list of {category, subtype, label} for every possible row, plus admin rows
+  const rows = [];
+  TAXONOMY.forEach(t=>{
+    if(t.subtypes){
+      t.subtypes.forEach(st=> rows.push({category:t.key, subtype:st.key, label: rowLabel(t.key, st.key)}));
+    } else {
+      rows.push({category:t.key, subtype:null, label: rowLabel(t.key, null)});
+    }
+  });
+  rows.push({category:STUDENT_OF_CLASS_KEY, subtype:null, label:'Student of the Class'});
+  rows.push({category:NO_ENTRIES_KEY, subtype:null, label:'No Entries Logged'});
+  return rows;
+}
+
+async function renderStudentPivot(studentId){
+  const events = await dbGetAllByIndex('events','studentId', studentId);
+  if(events.length===0) return `<div class="empty">No data logged yet for this student.</div>`;
+
+  const sessions = await dbGetAllByIndex('sessions','classId', state.currentClassId);
+  const sessionDateById = {}; sessions.forEach(s=> sessionDateById[s.id]=s.date);
+  const dates = [...new Set(events.map(e=>sessionDateById[e.sessionId]).filter(Boolean))].sort();
+
+  const rows = allRowKeys();
+  const counts = {}; // rowKey -> date -> count
+  rows.forEach(r=> counts[r.category+'|'+r.subtype] = {});
+  events.forEach(e=>{
+    const date = sessionDateById[e.sessionId];
+    if(!date) return;
+    const k = e.category+'|'+e.subtype;
+    if(!(k in counts)) counts[k] = {};
+    counts[k][date] = (counts[k][date]||0)+1;
+  });
+
+  const usedRows = rows.filter(r=>{
+    const k = r.category+'|'+r.subtype;
+    return counts[k] && Object.values(counts[k]).some(v=>v>0);
+  });
+
+  let theadCols = dates.map(d=>`<th>${formatDateNice(d)}</th>`).join('');
+  let tbodyRows = usedRows.map(r=>{
+    const k = r.category+'|'+r.subtype;
+    const cells = dates.map(d=>`<td>${counts[k][d]||''}</td>`).join('');
+    return `<tr><td class="rowlabel">${escapeHtml(r.label)}</td>${cells}</tr>`;
+  }).join('');
+
+  return `<div class="scroll-x"><table class="pivot">
+    <thead><tr><th class="rowlabel">Category</th>${theadCols}</tr></thead>
+    <tbody>${tbodyRows}</tbody>
+  </table></div>`;
+}
+
+async function renderClassSummaryPivot(students){
+  const allEvents = await dbGetAllByIndex('events','classId', state.currentClassId);
+  const rows = allRowKeys();
+  const counts = {}; // studentId -> rowKey -> count
+  students.forEach(s=> counts[s.id] = {});
+  allEvents.forEach(e=>{
+    const k = e.category+'|'+e.subtype;
+    if(!counts[e.studentId]) counts[e.studentId] = {};
+    counts[e.studentId][k] = (counts[e.studentId][k]||0)+1;
+  });
+  const usedRows = rows.filter(r=>{
+    const k = r.category+'|'+r.subtype;
+    return students.some(s=> (counts[s.id]||{})[k] > 0);
+  });
+
+  const theadCols = students.map(s=>`<th>${escapeHtml(s.name)}</th>`).join('');
+  const tbodyRows = usedRows.map(r=>{
+    const k = r.category+'|'+r.subtype;
+    const cells = students.map(s=>`<td>${(counts[s.id]||{})[k]||''}</td>`).join('');
+    return `<tr><td class="rowlabel">${escapeHtml(r.label)}</td>${cells}</tr>`;
+  }).join('');
+
+  return `<div class="scroll-x"><table class="pivot">
+    <thead><tr><th class="rowlabel">Category</th>${theadCols}</tr></thead>
+    <tbody>${tbodyRows}</tbody>
+  </table></div>`;
+}
+
+function wireDataTabEvents(){
+  document.querySelectorAll('[data-dataview]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      state.dataView = el.getAttribute('data-dataview');
+      render();
+    });
+  });
+  const sel = document.getElementById('student-select');
+  if(sel){
+    sel.addEventListener('change', ()=>{
+      state.dataSelectedStudentId = sel.value;
+      render();
+    });
+  }
+  const exportBtn = document.getElementById('export-now-btn');
+  if(exportBtn){
+    exportBtn.addEventListener('click', ()=> exportClassToExcel(state.currentClassId, {silent:false}));
+  }
+}
+
+/* ============ EXCEL EXPORT ============ */
+async function exportClassToExcel(classId, opts){
+  opts = opts || {};
+  const cls = await dbGet('classes', classId);
+  const students = (await dbGetAllByIndex('students','classId', classId)).sort((a,b)=>a.name.localeCompare(b.name));
+  const events = await dbGetAllByIndex('events','classId', classId);
+  const sessions = (await dbGetAllByIndex('sessions','classId', classId)).sort((a,b)=>a.date.localeCompare(b.date));
+  const sessionDateById = {}; sessions.forEach(s=> sessionDateById[s.id]=s.date);
+  const studentNameById = {}; students.forEach(s=> studentNameById[s.id]=s.name);
+
+  const wb = XLSX.utils.book_new();
+
+  // Sheet 1: Raw Log
+  const rawHeader = ['Date','Session ID','Student','Category','Subtype','Note','Timestamp'];
+  const rawRows = events
+    .slice()
+    .sort((a,b)=>a.timestamp-b.timestamp)
+    .map(e=>[
+      sessionDateById[e.sessionId] || '',
+      e.sessionId,
+      studentNameById[e.studentId] || '(removed student)',
+      catLabel(e.category),
+      subLabel(e.category, e.subtype) || '',
+      e.note || '',
+      new Date(e.timestamp).toISOString()
+    ]);
+  const rawSheet = XLSX.utils.aoa_to_sheet([rawHeader, ...rawRows]);
+  XLSX.utils.book_append_sheet(wb, rawSheet, 'Raw Log');
+
+  // Sheet 2: Class Summary (students x categories totals)
+  const rows = allRowKeys();
+  const classCounts = {};
+  students.forEach(s=> classCounts[s.id] = {});
+  events.forEach(e=>{
+    const k = e.category+'|'+e.subtype;
+    if(!classCounts[e.studentId]) classCounts[e.studentId] = {};
+    classCounts[e.studentId][k] = (classCounts[e.studentId][k]||0)+1;
+  });
+  const usedRowsClass = rows.filter(r=>{
+    const k = r.category+'|'+r.subtype;
+    return students.some(s=> (classCounts[s.id]||{})[k] > 0);
+  });
+  const summaryHeader = ['Category', ...students.map(s=>s.name)];
+  const summaryRows = usedRowsClass.map(r=>{
+    const k = r.category+'|'+r.subtype;
+    return [r.label, ...students.map(s=> (classCounts[s.id]||{})[k] || 0)];
+  });
+  const summarySheet = XLSX.utils.aoa_to_sheet([summaryHeader, ...summaryRows]);
+  XLSX.utils.book_append_sheet(wb, summarySheet, 'Class Summary');
+
+  // Sheet per student: pivot (category rows x date cols)
+  const dates = [...new Set(sessions.map(s=>s.date))].sort();
+  const usedSheetNames = new Set(['Raw Log','Class Summary']);
+  for(const s of students){
+    const studentEvents = events.filter(e=>e.studentId===s.id);
+    if(studentEvents.length===0) continue;
+    const counts = {};
+    studentEvents.forEach(e=>{
+      const date = sessionDateById[e.sessionId];
+      if(!date) return;
+      const k = e.category+'|'+e.subtype;
+      if(!counts[k]) counts[k] = {};
+      counts[k][date] = (counts[k][date]||0)+1;
+    });
+    const usedRowsS = rows.filter(r=>{
+      const k = r.category+'|'+r.subtype;
+      return counts[k] && Object.values(counts[k]).some(v=>v>0);
+    });
+    const header = ['Category', ...dates.map(formatDateNice)];
+    const body = usedRowsS.map(r=>{
+      const k = r.category+'|'+r.subtype;
+      return [r.label, ...dates.map(d=> (counts[k] && counts[k][d]) || 0)];
+    });
+    let sheetName = sanitizeSheetName(s.name);
+    let n = 1;
+    while(usedSheetNames.has(sheetName)){ n++; sheetName = sanitizeSheetName(s.name+' '+n); }
+    usedSheetNames.add(sheetName);
+    const sheet = XLSX.utils.aoa_to_sheet([header, ...body]);
+    XLSX.utils.book_append_sheet(wb, sheet, sheetName);
+  }
+
+  const filename = `${(cls?cls.name:'class').replace(/[^a-z0-9\-_]/gi,'_')}_backup_${todayStr()}.xlsx`;
+  try{
+    XLSX.writeFile(wb, filename);
+    if(!opts.silent) toast('Backup exported: '+filename, 'good');
+  }catch(err){
+    console.error(err);
+    toast('Export failed — see console');
+  }
+}
+
+/* ============ BOOTSTRAP ============ */
+document.addEventListener('DOMContentLoaded', ()=>{
+  render();
+});
+</script>
+</body>
+</html>
