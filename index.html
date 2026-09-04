@@ -43,6 +43,7 @@
   input[type=text], textarea, select{
     width:100%; padding:12px; border-radius:10px; border:1px solid var(--line); font-size:15px; background:#fff; color:var(--ink);
   }
+  input[type=checkbox]{width:auto;}
   textarea{resize:vertical; min-height:64px;}
   label{font-size:13px; color:var(--muted); display:block; margin-bottom:4px;}
   .field{margin-bottom:12px;}
@@ -58,17 +59,21 @@
   .student-btn{
     background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px 10px;
     min-height:96px; display:flex; flex-direction:column; align-items:center; justify-content:center;
-    gap:8px; cursor:pointer; text-align:center; position:relative;
+    gap:8px; cursor:pointer; text-align:center; position:relative; border-top:5px solid transparent;
   }
   .student-btn:active{transform:scale(0.96); background:#eef3ff;}
   .student-avatar{
-    width:44px; height:44px; border-radius:50%; background:var(--accent); color:#fff; font-weight:700;
-    display:flex; align-items:center; justify-content:center; font-size:16px;
+    width:44px; height:44px; border-radius:50%; background:#8a94a6; color:#fff; font-weight:700;
+    display:flex; align-items:center; justify-content:center; font-size:16px; flex-shrink:0;
   }
   .student-name{font-weight:600; font-size:14px;}
   .event-badge{
     position:absolute; top:8px; right:8px; background:var(--ink); color:#fff; font-size:11px; font-weight:700;
     border-radius:10px; padding:2px 7px;
+  }
+  .answered-badge{
+    position:absolute; bottom:8px; right:8px; width:18px; height:18px; border-radius:50%;
+    background:var(--good); color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;
   }
   .modal-backdrop{
     position:fixed; inset:0; background:rgba(20,22,30,0.5); display:flex; align-items:flex-end; justify-content:center;
@@ -111,6 +116,11 @@
   .footer-actions{position:sticky; bottom:0; background:linear-gradient(to top, var(--bg) 60%, transparent); padding:14px 0 4px; margin-top:10px;}
   .icon-btn{background:transparent; border:none; color:var(--muted); font-size:20px; cursor:pointer; padding:4px 8px;}
   a.link{color:var(--accent); font-weight:600; text-decoration:none;}
+  .swatch{width:22px; height:22px; border-radius:50%; border:2px solid transparent; cursor:pointer; padding:0;}
+  .swatch.selected{border-color:var(--ink);}
+  .house-dot{display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; vertical-align:middle;}
+  .balance-row{display:flex; align-items:center; justify-content:space-between; padding:6px 0; gap:10px;}
+  .directory-row{display:flex; align-items:flex-start; gap:10px; padding:10px; border:1px solid var(--line); border-radius:10px; margin-bottom:8px; cursor:pointer;}
 </style>
 </head>
 <body>
@@ -148,6 +158,26 @@ const REASON_TAGS = ['Great Insight','Helped a Classmate','Improved Effort','Str
 const NO_ENTRIES_KEY = 'no_entries';
 const STUDENT_OF_CLASS_KEY = 'student_of_class';
 
+const HOUSES = [
+  { key:'jackal', label:'Jackal', color:'#E07B39' },
+  { key:'cobra', label:'Cobra', color:'#C0392B' },
+  { key:'iguana', label:'Iguana', color:'#2F9E5F' },
+  { key:'dolphin', label:'Dolphin', color:'#2F6FED' }
+];
+function houseByKey(key){ return HOUSES.find(h=>h.key===key) || null; }
+
+const GENDERS = [
+  { key:'male', label:'Male', color:'#2f6fed' },
+  { key:'female', label:'Female', color:'#e0559c' }
+];
+function genderByKey(key){ return GENDERS.find(g=>g.key===key) || null; }
+
+const HOMEROOM_GROUPS = ['Group 1', 'Group 2', 'Group 3'];
+function avatarColor(student){
+  const g = genderByKey(student && student.gender);
+  return g ? g.color : '#8a94a6';
+}
+
 function catLabel(catKey){
   if(catKey === NO_ENTRIES_KEY) return 'No Entries Logged';
   if(catKey === STUDENT_OF_CLASS_KEY) return 'Student of the Class';
@@ -164,6 +194,48 @@ function rowLabel(catKey, subKey){
   const cl = catLabel(catKey);
   const sl = subLabel(catKey, subKey);
   return sl ? (cl + ' - ' + sl) : cl;
+}
+function studentHeaderLabel(s){
+  const bits = [];
+  const house = houseByKey(s.house); if(house) bits.push(house.label);
+  if(s.gender==='male') bits.push('M'); else if(s.gender==='female') bits.push('F');
+  return s.name + (bits.length ? ' ('+bits.join(', ')+')' : '');
+}
+
+/* ---- Positive/negative "balance" scoring, used only for the quick-glance charts ---- */
+function eventSignedValue(e){
+  if(e.category === STUDENT_OF_CLASS_KEY) return 1;
+  if(e.category === NO_ENTRIES_KEY) return 0;
+  if(e.category === 'shares_idea'){
+    if(e.subtype === 'good_answer' || e.subtype === 'creative') return 1;
+    if(e.subtype === 'off_topic') return -1;
+    return 0; // poor_logic: neutral, still participating
+  }
+  const cat = TAXONOMY.find(t=>t.key===e.category);
+  if(cat && cat.polarity === 'negative') return -1;
+  return 0;
+}
+function computeBalance(events){
+  let pos = 0, neg = 0;
+  events.forEach(e=>{
+    const v = eventSignedValue(e);
+    if(v > 0) pos += v; else if(v < 0) neg += -v;
+  });
+  return { pos, neg };
+}
+function renderBalanceBar(pos, neg, width){
+  width = width || 200;
+  const total = pos + neg;
+  const posW = total > 0 ? Math.round((pos/total)*width) : 0;
+  const negW = total > 0 ? Math.round((neg/total)*width) : 0;
+  return `
+    <div class="row" style="gap:8px;">
+      <svg width="${width}" height="14" style="border-radius:7px; overflow:hidden; background:#e7e9ee; flex-shrink:0;">
+        <rect x="0" y="0" width="${posW}" height="14" fill="#2f9e5f"></rect>
+        <rect x="${posW}" y="0" width="${negW}" height="14" fill="#c0392b"></rect>
+      </svg>
+      <span class="muted" style="font-size:12px; white-space:nowrap;">+${pos} / -${neg}</span>
+    </div>`;
 }
 
 /* ============ UTIL ============ */
@@ -202,15 +274,38 @@ function toast(msg, kind){
   root.appendChild(el);
   setTimeout(()=>{ el.remove(); }, 1600);
 }
+function normalizeKey(k){ return String(k||'').toLowerCase().replace(/[^a-z0-9]/g,''); }
+function normalizeRow(row){
+  const out = {};
+  Object.keys(row).forEach(k=>{ out[normalizeKey(k)] = row[k]; });
+  return out;
+}
+function getField(normalizedRow, ...candidates){
+  for(const c of candidates){
+    const nk = normalizeKey(c);
+    if(normalizedRow[nk] !== undefined && normalizedRow[nk] !== null) return normalizedRow[nk];
+  }
+  return '';
+}
+function normalizeGenderValue(v){
+  const s = String(v||'').trim().toLowerCase();
+  if(s.startsWith('m')) return 'male';
+  if(s.startsWith('f')) return 'female';
+  return null;
+}
+function normalizeHouseValue(v){
+  const s = String(v||'').trim().toLowerCase();
+  const h = HOUSES.find(h=> h.key===s || h.label.toLowerCase()===s);
+  return h ? h.key : null;
+}
 
 /* ============ INDEXEDDB LAYER ============ */
 const DB_NAME = 'classroomTrackerDB';
-const DB_VERSION = 1;
-let dbPromise = null;
+const DB_VERSION = 2; // v2 adds the 'directory' store; existing stores are untouched on upgrade
 
 function openDB(){
-  if(dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject)=>{
+  if(openDB._p) return openDB._p;
+  openDB._p = new Promise((resolve, reject)=>{
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e)=>{
       const db = e.target.result;
@@ -231,11 +326,15 @@ function openDB(){
         s.createIndex('studentId','studentId',{unique:false});
         s.createIndex('classId','classId',{unique:false});
       }
+      if(!db.objectStoreNames.contains('directory')){
+        const s = db.createObjectStore('directory', {keyPath:'id'});
+        s.createIndex('cohort','cohort',{unique:false});
+      }
     };
     req.onsuccess = (e)=> resolve(e.target.result);
     req.onerror = (e)=> reject(e.target.error);
   });
-  return dbPromise;
+  return openDB._p;
 }
 async function dbAdd(store, obj){
   const db = await openDB();
@@ -299,16 +398,14 @@ const state = {
   activeTab:'log',           // log | data
   dataSelectedStudentId:null,
   dataView:'student',        // student | classSummary
-  openSessionCache:null      // {id,date,status,...} for current class's open/today session (read-only lookup)
+  openSessionCache:null
 };
 
 /* ============ SESSION LOGIC ============ */
-// Read-only lookup: does a session for today already exist for this class? Does NOT create one.
 async function findTodaySession(classId){
   const sessions = await dbGetAllByIndex('sessions','classId', classId);
   const today = todayStr();
   const todays = sessions.filter(s=>s.date===today);
-  // prefer an open one if present, else most recently created closed one (for banner display only)
   const open = todays.find(s=>s.status==='open');
   if(open) return open;
   if(todays.length){
@@ -316,7 +413,6 @@ async function findTodaySession(classId){
   }
   return null;
 }
-// Called only at the moment of the FIRST actual log action of the day.
 async function getOrCreateOpenTodaySession(classId){
   const existing = await findTodaySession(classId);
   if(existing && existing.status==='open') return existing;
@@ -347,6 +443,12 @@ async function render(){
 /* ============ VIEW: CLASS LIST ============ */
 async function renderClassList(){
   const classes = (await dbGetAll('classes')).sort((a,b)=>a.name.localeCompare(b.name));
+  const directoryEntries = await dbGetAll('directory');
+  const cohortSet = new Set(directoryEntries.map(d=>d.cohort));
+  const directoryStatus = directoryEntries.length
+    ? `${directoryEntries.length} student${directoryEntries.length===1?'':'s'} across ${cohortSet.size} cohort${cohortSet.size===1?'':'s'}`
+    : 'No directory imported yet';
+
   let cardsHtml = '';
   if(classes.length===0){
     cardsHtml = `<div class="empty">No classes yet. Add your first class to get started.</div>`;
@@ -364,6 +466,18 @@ async function renderClassList(){
   return `
     <div class="topbar">
       <div class="title">Classroom Tracker</div>
+    </div>
+    <div class="card">
+      <div class="row between" style="flex-wrap:wrap; gap:10px;">
+        <div>
+          <strong>Student Directory</strong>
+          <div class="muted">${directoryStatus}</div>
+        </div>
+        <div>
+          <input type="file" id="directory-file-input" accept=".xlsx,.xls" style="display:none;">
+          <button class="btn small" id="import-directory-btn">Import / Update Directory</button>
+        </div>
+      </div>
     </div>
     <div class="card">
       <label>New class name</label>
@@ -394,6 +508,56 @@ function wireClassList(){
       render();
     });
   });
+  document.getElementById('import-directory-btn').addEventListener('click', ()=>{
+    document.getElementById('directory-file-input').click();
+  });
+  document.getElementById('directory-file-input').addEventListener('change', async (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    try{
+      const result = await importDirectoryFile(file);
+      toast(`Imported ${result.totalStudents} students across ${result.cohortCount} cohort(s)`, 'good');
+    }catch(err){
+      console.error(err);
+      toast('Import failed — check the file format');
+    }
+    render();
+  });
+}
+
+/* ---- Directory import: one sheet per cohort ---- */
+async function importDirectoryFile(file){
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, {type:'array'});
+  let totalStudents = 0;
+  let cohortCount = 0;
+  for(const sheetName of wb.SheetNames){
+    const sheet = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, {defval:''});
+    if(rows.length===0) continue;
+    cohortCount++;
+    for(const rawRow of rows){
+      const row = normalizeRow(rawRow);
+      const id = String(getField(row,'Student ID')).trim();
+      const givenName = String(getField(row,'Given Name')).trim();
+      const familyName = String(getField(row,'Family Name')).trim();
+      if(!id || !givenName) continue;
+      const record = {
+        id,
+        cohort: sheetName,
+        givenName,
+        familyName,
+        homeroomGroup: String(getField(row,'Homeroom Group')).trim() || null,
+        homeroomTeacher: String(getField(row,'Homeroom Teacher')).trim() || null,
+        house: normalizeHouseValue(getField(row,'House')),
+        gender: normalizeGenderValue(getField(row,'Gender')),
+        importedAt: Date.now()
+      };
+      await dbPut('directory', record);
+      totalStudents++;
+    }
+  }
+  return { totalStudents, cohortCount };
 }
 
 /* ============ VIEW: ROSTER EDITOR ============ */
@@ -401,28 +565,60 @@ async function renderRoster(){
   const cls = await dbGet('classes', state.currentClassId);
   const students = (await dbGetAllByIndex('students','classId', state.currentClassId))
     .sort((a,b)=>a.name.localeCompare(b.name));
-  let rowsHtml = students.map(s=>`
-    <div class="row between card" style="padding:10px 14px; margin-bottom:8px;">
+  let rowsHtml = students.map(s=>{
+    const houseSwatches = HOUSES.map(h=>`
+      <button class="swatch ${s.house===h.key?'selected':''}" data-house-pick="${s.id}|${h.key}"
+        style="background:${h.color};" title="${escapeHtml(h.label)}"></button>
+    `).join('');
+    const genderSwatches = GENDERS.map(g=>`
+      <button class="swatch ${s.gender===g.key?'selected':''}" data-gender-pick="${s.id}|${g.key}"
+        style="background:${g.color};" title="${escapeHtml(g.label)}"></button>
+    `).join('');
+    const groupButtons = HOMEROOM_GROUPS.map(g=>`
+      <button class="btn small ${s.homeroomGroup===g?'primary':''}" data-group-pick="${s.id}|${g}">${escapeHtml(g)}</button>
+    `).join('');
+    const metaBits = [s.homeroomTeacher].filter(Boolean).join(' &middot; ');
+    return `
+    <div class="row between card" style="padding:10px 14px; margin-bottom:8px; flex-wrap:wrap; gap:16px;">
       <div class="row">
-        <div class="student-avatar" style="width:32px;height:32px;font-size:12px;">${escapeHtml(initials(s.name))}</div>
-        <div>${escapeHtml(s.name)}${s.active===false?' <span class="muted">(inactive)</span>':''}</div>
+        <div class="student-avatar" style="width:32px;height:32px;font-size:12px;background:${avatarColor(s)};">${escapeHtml(initials(s.name))}</div>
+        <div>
+          <div>${escapeHtml(s.name)}${s.active===false?' <span class="muted">(inactive)</span>':''}</div>
+          ${metaBits ? `<div class="muted" style="font-size:12px;">${metaBits}</div>` : ''}
+        </div>
       </div>
-      <div class="row">
+      <div class="row" style="gap:16px; flex-wrap:wrap;">
+        <div>
+          <div class="muted" style="font-size:11px; margin-bottom:3px;">House Color</div>
+          <div class="row" style="gap:6px;">${houseSwatches}</div>
+        </div>
+        <div>
+          <div class="muted" style="font-size:11px; margin-bottom:3px;">Gender</div>
+          <div class="row" style="gap:6px;">${genderSwatches}</div>
+        </div>
+        <div>
+          <div class="muted" style="font-size:11px; margin-bottom:3px;">Homeroom Group</div>
+          <div class="row" style="gap:6px;">${groupButtons}</div>
+        </div>
+        <button class="btn small" data-edit-student="${s.id}">Edit</button>
         <button class="btn small" data-toggle-student="${s.id}">${s.active===false?'Reactivate':'Deactivate'}</button>
+        <button class="btn small danger" data-delete-student="${s.id}">Delete</button>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
   return `
     <div class="topbar">
       <button class="btn ghost" id="back-to-list">&larr; All Classes</button>
     </div>
     <h2>${escapeHtml(cls ? cls.name : '')} Roster</h2>
-    <div class="muted" style="margin-bottom:14px;">Deactivated students are hidden from live logging but kept in historical data.</div>
+    <div class="muted" style="margin-bottom:14px;">Deactivated students are hidden from live logging but kept in historical data. Delete only removes students with no logged history &mdash; otherwise, deactivate instead.</div>
     <div class="card">
       <label>Add student</label>
-      <div class="row">
-        <input type="text" id="new-student-name" placeholder="Student name">
-        <button class="btn primary" id="add-student-btn">Add</button>
+      <div class="row wrap">
+        <input type="text" id="new-student-name" placeholder="Student name" style="max-width:260px;">
+        <button class="btn primary" id="add-student-btn">Add Manually</button>
+        <button class="btn" id="add-from-directory-btn">Add from Directory</button>
       </div>
     </div>
     ${rowsHtml || '<div class="empty">No students yet.</div>'}
@@ -439,9 +635,14 @@ function wireRoster(){
     const input = document.getElementById('new-student-name');
     const name = input.value.trim();
     if(!name){ toast('Enter a student name'); return; }
-    await dbAdd('students', { id:uuid(), classId:state.currentClassId, name, active:true, createdAt:Date.now() });
+    await dbAdd('students', {
+      id:uuid(), classId:state.currentClassId, name, active:true,
+      house:null, gender:null, homeroomGroup:null, homeroomTeacher:null, directoryId:null,
+      createdAt:Date.now()
+    });
     render();
   });
+  document.getElementById('add-from-directory-btn').addEventListener('click', openAddFromDirectoryModal);
   document.querySelectorAll('[data-toggle-student]').forEach(el=>{
     el.addEventListener('click', async ()=>{
       const id = el.getAttribute('data-toggle-student');
@@ -451,9 +652,162 @@ function wireRoster(){
       render();
     });
   });
+  document.querySelectorAll('[data-house-pick]').forEach(el=>{
+    el.addEventListener('click', async ()=>{
+      const [id, houseKey] = el.getAttribute('data-house-pick').split('|');
+      const s = await dbGet('students', id);
+      s.house = (s.house === houseKey) ? null : houseKey;
+      await dbPut('students', s);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-gender-pick]').forEach(el=>{
+    el.addEventListener('click', async ()=>{
+      const [id, genderKey] = el.getAttribute('data-gender-pick').split('|');
+      const s = await dbGet('students', id);
+      s.gender = (s.gender === genderKey) ? null : genderKey;
+      await dbPut('students', s);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-group-pick]').forEach(el=>{
+    el.addEventListener('click', async ()=>{
+      const [id, group] = el.getAttribute('data-group-pick').split('|');
+      const s = await dbGet('students', id);
+      s.homeroomGroup = (s.homeroomGroup === group) ? null : group;
+      await dbPut('students', s);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-edit-student]').forEach(el=>{
+    el.addEventListener('click', async ()=>{
+      const id = el.getAttribute('data-edit-student');
+      const s = await dbGet('students', id);
+      const newName = window.prompt('Edit student name', s.name);
+      if(newName && newName.trim()){
+        s.name = newName.trim();
+        await dbPut('students', s);
+        render();
+      }
+    });
+  });
+  document.querySelectorAll('[data-delete-student]').forEach(el=>{
+    el.addEventListener('click', async ()=>{
+      const id = el.getAttribute('data-delete-student');
+      const existingEvents = await dbGetAllByIndex('events','studentId', id);
+      if(existingEvents.length > 0){
+        toast('This student has logged history — deactivate instead of deleting');
+        return;
+      }
+      const s = await dbGet('students', id);
+      if(window.confirm(`Delete ${s.name}? This cannot be undone.`)){
+        await dbDelete('students', id);
+        render();
+      }
+    });
+  });
   document.getElementById('done-roster-btn').addEventListener('click', ()=>{
     state.view='classHome'; state.activeTab='log'; render();
   });
+}
+
+/* ---- Add from Directory: pick cohort, then check students ---- */
+async function openAddFromDirectoryModal(){
+  const directoryEntries = await dbGetAll('directory');
+  if(directoryEntries.length===0){
+    toast('No directory imported yet — import one from the All Classes screen');
+    return;
+  }
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'directory-modal-backdrop';
+  backdrop.innerHTML = `<div class="modal"></div>`;
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) backdrop.remove(); });
+  renderDirectoryCohortStep(backdrop, directoryEntries);
+}
+
+function renderDirectoryCohortStep(backdrop, directoryEntries){
+  const cohorts = [...new Set(directoryEntries.map(d=>d.cohort))].sort();
+  const modalEl = backdrop.querySelector('.modal');
+  modalEl.innerHTML = `
+    <div class="modal-header">
+      <h3>Add from Directory</h3>
+      <button class="icon-btn" id="close-directory-modal">&times;</button>
+    </div>
+    <div class="muted" style="margin-bottom:10px;">Choose a cohort</div>
+    ${cohorts.map(c=>`<button class="cat-btn" data-cohort="${escapeHtml(c)}">${escapeHtml(c)}</button>`).join('')}
+  `;
+  modalEl.querySelector('#close-directory-modal').addEventListener('click', ()=>backdrop.remove());
+  modalEl.querySelectorAll('[data-cohort]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      renderDirectoryStudentPickStep(backdrop, el.getAttribute('data-cohort'), directoryEntries);
+    });
+  });
+}
+
+async function renderDirectoryStudentPickStep(backdrop, cohort, directoryEntries){
+  const cohortEntries = directoryEntries
+    .filter(d=>d.cohort===cohort)
+    .sort((a,b)=> (a.givenName+a.familyName).localeCompare(b.givenName+b.familyName));
+  const existingStudents = await dbGetAllByIndex('students','classId', state.currentClassId);
+  const alreadyAddedIds = new Set(existingStudents.map(s=>s.directoryId).filter(Boolean));
+  const availableEntries = cohortEntries.filter(d=>!alreadyAddedIds.has(d.id));
+
+  const modalEl = backdrop.querySelector('.modal');
+  modalEl.innerHTML = `
+    <div class="modal-header">
+      <h3>${escapeHtml(cohort)}</h3>
+      <button class="icon-btn" id="close-directory-modal2">&times;</button>
+    </div>
+    <div class="muted" style="margin-bottom:10px;">Select students to add to this class</div>
+    <div style="max-height:320px; overflow-y:auto;">
+      ${availableEntries.length ? availableEntries.map(d=>{
+        const house = houseByKey(d.house);
+        const gender = genderByKey(d.gender);
+        const metaBits = [d.homeroomGroup, d.homeroomTeacher, house?house.label:null, gender?gender.label:null].filter(Boolean).join(' &middot; ');
+        return `
+        <label class="directory-row">
+          <input type="checkbox" data-directory-student="${d.id}">
+          <div>
+            <div style="font-weight:600;">${escapeHtml(d.givenName)} ${escapeHtml(d.familyName)}</div>
+            ${metaBits ? `<div class="muted" style="font-size:12px;">${metaBits}</div>` : ''}
+          </div>
+        </label>`;
+      }).join('') : '<div class="empty">Everyone in this cohort is already in this class.</div>'}
+    </div>
+    <button class="btn ghost" id="back-to-cohorts" style="margin-top:10px;">&larr; Back</button>
+    ${availableEntries.length ? '<button class="btn primary block" id="add-selected-directory-btn" style="margin-top:10px;">Add Selected</button>' : ''}
+  `;
+  modalEl.querySelector('#close-directory-modal2').addEventListener('click', ()=>backdrop.remove());
+  modalEl.querySelector('#back-to-cohorts').addEventListener('click', ()=>{
+    renderDirectoryCohortStep(backdrop, directoryEntries);
+  });
+  const addBtn = modalEl.querySelector('#add-selected-directory-btn');
+  if(addBtn){
+    addBtn.addEventListener('click', async ()=>{
+      const checked = [...modalEl.querySelectorAll('[data-directory-student]:checked')];
+      if(checked.length===0){ toast('Select at least one student'); return; }
+      for(const cb of checked){
+        const id = cb.getAttribute('data-directory-student');
+        const rec = availableEntries.find(d=>d.id===id);
+        await dbAdd('students', {
+          id: uuid(), classId: state.currentClassId,
+          name: (rec.givenName+' '+rec.familyName).trim(),
+          active: true,
+          house: rec.house || null,
+          gender: rec.gender || null,
+          homeroomGroup: rec.homeroomGroup || null,
+          homeroomTeacher: rec.homeroomTeacher || null,
+          directoryId: rec.id,
+          createdAt: Date.now()
+        });
+      }
+      toast(`Added ${checked.length} student(s) from directory`, 'good');
+      backdrop.remove();
+      render();
+    });
+  }
 }
 
 /* ============ VIEW: CLASS HOME (LOG / DATA TABS) ============ */
@@ -504,9 +858,11 @@ async function renderLogTab(todaySession){
     .sort((a,b)=>a.name.localeCompare(b.name));
 
   let eventCounts = {};
+  let answeredIds = new Set();
   if(todaySession){
     const events = await dbGetAllByIndex('events','sessionId', todaySession.id);
     events.forEach(e=>{
+      if(e.category==='shares_idea') answeredIds.add(e.studentId);
       if(e.category===NO_ENTRIES_KEY) return;
       eventCounts[e.studentId] = (eventCounts[e.studentId]||0)+1;
     });
@@ -530,25 +886,43 @@ async function renderLogTab(todaySession){
     </div>`;
   }
 
+  const unansweredCount = students.filter(s=>!answeredIds.has(s.id)).length;
+  const toolsRow = `<div class="row" style="margin-bottom:4px;">
+    <button class="btn small" id="pick-random-btn">Pick a Student</button>
+  </div>
+  <div class="muted" style="margin-bottom:12px; font-size:12px;">
+    Prioritizes students who haven't answered yet today (green check = already answered) &mdash; picks from the whole class once everyone has.
+    ${todaySession ? ` Right now: ${unansweredCount} of ${students.length} haven't answered.` : ''}
+  </div>`;
+
   if(students.length===0){
     return banner + `<div class="empty">No active students in this class. Add students from Edit Roster.</div>`;
   }
 
-  const gridHtml = students.map(s=>`
-    <div class="student-btn" data-log-student="${s.id}">
+  const gridHtml = students.map(s=>{
+    const house = houseByKey(s.house);
+    const stripe = house ? `border-top-color:${house.color};` : '';
+    return `
+    <div class="student-btn" data-log-student="${s.id}" style="${stripe}">
       ${eventCounts[s.id] ? `<div class="event-badge">${eventCounts[s.id]}</div>` : ''}
-      <div class="student-avatar">${escapeHtml(initials(s.name))}</div>
+      ${answeredIds.has(s.id) ? `<div class="answered-badge" title="Already answered today">&#10003;</div>` : ''}
+      <div class="student-avatar" style="background:${avatarColor(s)};">${escapeHtml(initials(s.name))}</div>
       <div class="student-name">${escapeHtml(s.name)}</div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
-  return `${banner}<div class="student-grid">${gridHtml}</div>`;
+  return `${banner}${toolsRow}<div class="student-grid">${gridHtml}</div>`;
 }
 
 function wireLogTabEvents(){
   const endBtn = document.getElementById('end-class-btn');
   if(endBtn){
     endBtn.addEventListener('click', ()=> openEndOfClassModal());
+  }
+  const pickBtn = document.getElementById('pick-random-btn');
+  if(pickBtn){
+    pickBtn.addEventListener('click', handlePickRandomStudent);
   }
   document.querySelectorAll('[data-log-student]').forEach(el=>{
     el.addEventListener('click', async ()=>{
@@ -557,6 +931,26 @@ function wireLogTabEvents(){
       openEventModal(student);
     });
   });
+}
+
+/* ---- Random picker: unanswered students first, whole class once everyone has answered ---- */
+async function handlePickRandomStudent(){
+  const students = (await dbGetAllByIndex('students','classId', state.currentClassId))
+    .filter(s=>s.active!==false);
+  if(students.length===0){ toast('No active students to pick from'); return; }
+  const todaySession = await findTodaySession(state.currentClassId);
+  const answeredIds = new Set();
+  if(todaySession){
+    const events = await dbGetAllByIndex('events','sessionId', todaySession.id);
+    events.forEach(e=>{ if(e.category==='shares_idea') answeredIds.add(e.studentId); });
+  }
+  const unanswered = students.filter(s=>!answeredIds.has(s.id));
+  const pool = unanswered.length > 0 ? unanswered : students;
+  const picked = pool[Math.floor(Math.random()*pool.length)];
+  const msg = unanswered.length > 0
+    ? `Picked: ${picked.name} (${pool.length} of ${students.length} haven't answered yet)`
+    : `Picked: ${picked.name} (everyone has answered — picked from full class of ${students.length})`;
+  toast(msg, 'good');
 }
 
 /* ---- Event logging modal ---- */
@@ -622,11 +1016,12 @@ function openEventModal(student, categoryKey){
   }
 }
 
-async function logEvent(student, categoryKey, subKey){
+async function logEvent(student, categoryKey, subKey, amount){
+  amount = amount || 1;
   const session = await getOrCreateOpenTodaySession(state.currentClassId);
   const ev = {
     id: uuid(), sessionId: session.id, classId: state.currentClassId, studentId: student.id,
-    category: categoryKey, subtype: subKey || null, note:null, timestamp: Date.now()
+    category: categoryKey, subtype: subKey || null, note:null, amount, timestamp: Date.now()
   };
   await dbAdd('events', ev);
   toast(`${student.name}: ${rowLabel(categoryKey, subKey)}`, 'good');
@@ -638,15 +1033,12 @@ async function openEndOfClassModal(){
   let session = await findTodaySession(state.currentClassId);
   if(session && session.status==='closed'){ toast('Today has already been submitted'); return; }
   if(!session){
-    // Nothing was tapped today — create today's session now so it can still be
-    // submitted with a full "no entries" record for every student.
     session = await getOrCreateOpenTodaySession(state.currentClassId);
   }
 
   const students = (await dbGetAllByIndex('students','classId', state.currentClassId))
     .filter(s=>s.active!==false).sort((a,b)=>a.name.localeCompare(b.name));
 
-  // compute "last won" recency for nudge
   const allSessions = (await dbGetAllByIndex('sessions','classId', state.currentClassId))
     .filter(s=>s.status==='closed' && s.studentOfClassId)
     .sort((a,b)=>b.closedAt - a.closedAt);
@@ -738,23 +1130,20 @@ function renderEocReasonStep(backdrop, session, students, student){
 }
 
 async function finalizeSession(session, students, studentOfClassId, reason){
-  // 1. fill no_entries for students with zero events this session
   const events = await dbGetAllByIndex('events','sessionId', session.id);
   const touchedIds = new Set(events.map(e=>e.studentId));
   for(const s of students){
     if(!touchedIds.has(s.id)){
       await dbAdd('events', {
         id: uuid(), sessionId: session.id, classId: state.currentClassId, studentId: s.id,
-        category: NO_ENTRIES_KEY, subtype:null, note:null, timestamp: Date.now()
+        category: NO_ENTRIES_KEY, subtype:null, note:null, amount:1, timestamp: Date.now()
       });
     }
   }
-  // 2. student of the class event
   await dbAdd('events', {
     id: uuid(), sessionId: session.id, classId: state.currentClassId, studentId: studentOfClassId,
-    category: STUDENT_OF_CLASS_KEY, subtype:null, note: reason || null, timestamp: Date.now()
+    category: STUDENT_OF_CLASS_KEY, subtype:null, note: reason || null, amount:1, timestamp: Date.now()
   });
-  // 3. close session
   session.status = 'closed';
   session.studentOfClassId = studentOfClassId;
   session.studentOfClassReason = reason || null;
@@ -797,7 +1186,6 @@ async function renderDataTab(){
 }
 
 function allRowKeys(){
-  // returns list of {category, subtype, label} for every possible row, plus admin rows
   const rows = [];
   TAXONOMY.forEach(t=>{
     if(t.subtypes){
@@ -812,22 +1200,34 @@ function allRowKeys(){
 }
 
 async function renderStudentPivot(studentId){
+  const student = await dbGet('students', studentId);
   const events = await dbGetAllByIndex('events','studentId', studentId);
   if(events.length===0) return `<div class="empty">No data logged yet for this student.</div>`;
+
+  const house = houseByKey(student ? student.house : null);
+  const balance = computeBalance(events);
+  const balanceBlock = `
+    <div class="card">
+      <div class="row">
+        ${house ? `<span class="house-dot" style="background:${house.color};"></span>` : ''}
+        <strong>Positive vs Negative Balance</strong>
+      </div>
+      <div style="margin-top:8px;">${renderBalanceBar(balance.pos, balance.neg, 260)}</div>
+    </div>`;
 
   const sessions = await dbGetAllByIndex('sessions','classId', state.currentClassId);
   const sessionDateById = {}; sessions.forEach(s=> sessionDateById[s.id]=s.date);
   const dates = [...new Set(events.map(e=>sessionDateById[e.sessionId]).filter(Boolean))].sort();
 
   const rows = allRowKeys();
-  const counts = {}; // rowKey -> date -> count
+  const counts = {};
   rows.forEach(r=> counts[r.category+'|'+r.subtype] = {});
   events.forEach(e=>{
     const date = sessionDateById[e.sessionId];
     if(!date) return;
     const k = e.category+'|'+e.subtype;
     if(!(k in counts)) counts[k] = {};
-    counts[k][date] = (counts[k][date]||0)+1;
+    counts[k][date] = (counts[k][date]||0) + (e.amount||1);
   });
 
   const usedRows = rows.filter(r=>{
@@ -842,21 +1242,62 @@ async function renderStudentPivot(studentId){
     return `<tr><td class="rowlabel">${escapeHtml(r.label)}</td>${cells}</tr>`;
   }).join('');
 
-  return `<div class="scroll-x"><table class="pivot">
+  const tableHtml = `<div class="scroll-x"><table class="pivot">
     <thead><tr><th class="rowlabel">Category</th>${theadCols}</tr></thead>
     <tbody>${tbodyRows}</tbody>
   </table></div>`;
+
+  return balanceBlock + tableHtml;
 }
 
 async function renderClassSummaryPivot(students){
   const allEvents = await dbGetAllByIndex('events','classId', state.currentClassId);
+
+  const eventsByStudent = {};
+  students.forEach(s=> eventsByStudent[s.id] = []);
+  allEvents.forEach(e=>{ if(eventsByStudent[e.studentId]) eventsByStudent[e.studentId].push(e); });
+
+  const balanceRowsHtml = students.map(s=>{
+    const house = houseByKey(s.house);
+    const b = computeBalance(eventsByStudent[s.id] || []);
+    return `<div class="balance-row">
+      <div class="row" style="min-width:130px;">
+        ${house ? `<span class="house-dot" style="background:${house.color};"></span>` : ''}
+        ${escapeHtml(s.name)}
+      </div>
+      ${renderBalanceBar(b.pos, b.neg, 180)}
+    </div>`;
+  }).join('');
+
+  const houseGroups = {}; HOUSES.forEach(h=> houseGroups[h.key] = []);
+  let unassignedEvents = [];
+  students.forEach(s=>{
+    const list = eventsByStudent[s.id] || [];
+    if(s.house && houseGroups[s.house]) houseGroups[s.house].push(...list);
+    else unassignedEvents.push(...list);
+  });
+  let houseBalanceHtml = HOUSES.map(h=>{
+    const b = computeBalance(houseGroups[h.key]);
+    return `<div class="balance-row">
+      <div class="row" style="min-width:90px;"><span class="house-dot" style="background:${h.color};"></span>${escapeHtml(h.label)}</div>
+      ${renderBalanceBar(b.pos, b.neg, 180)}
+    </div>`;
+  }).join('');
+  if(unassignedEvents.length){
+    const b = computeBalance(unassignedEvents);
+    houseBalanceHtml += `<div class="balance-row">
+      <div class="muted" style="min-width:90px;">Unassigned</div>
+      ${renderBalanceBar(b.pos, b.neg, 180)}
+    </div>`;
+  }
+
   const rows = allRowKeys();
-  const counts = {}; // studentId -> rowKey -> count
+  const counts = {};
   students.forEach(s=> counts[s.id] = {});
   allEvents.forEach(e=>{
     const k = e.category+'|'+e.subtype;
     if(!counts[e.studentId]) counts[e.studentId] = {};
-    counts[e.studentId][k] = (counts[e.studentId][k]||0)+1;
+    counts[e.studentId][k] = (counts[e.studentId][k]||0) + (e.amount||1);
   });
   const usedRows = rows.filter(r=>{
     const k = r.category+'|'+r.subtype;
@@ -870,10 +1311,19 @@ async function renderClassSummaryPivot(students){
     return `<tr><td class="rowlabel">${escapeHtml(r.label)}</td>${cells}</tr>`;
   }).join('');
 
-  return `<div class="scroll-x"><table class="pivot">
-    <thead><tr><th class="rowlabel">Category</th>${theadCols}</tr></thead>
-    <tbody>${tbodyRows}</tbody>
-  </table></div>`;
+  return `
+    <div class="card">
+      <h3>Positive vs Negative Balance</h3>
+      ${balanceRowsHtml}
+    </div>
+    <div class="card">
+      <h3>Positive vs Negative Balance by House</h3>
+      ${houseBalanceHtml}
+    </div>
+    <div class="scroll-x"><table class="pivot">
+      <thead><tr><th class="rowlabel">Category</th>${theadCols}</tr></thead>
+      <tbody>${tbodyRows}</tbody>
+    </table></div>`;
 }
 
 function wireDataTabEvents(){
@@ -909,7 +1359,7 @@ async function exportClassToExcel(classId, opts){
   const wb = XLSX.utils.book_new();
 
   // Sheet 1: Raw Log
-  const rawHeader = ['Date','Session ID','Student','Category','Subtype','Note','Timestamp'];
+  const rawHeader = ['Date','Session ID','Student','Category','Subtype','Amount','Note','Timestamp'];
   const rawRows = events
     .slice()
     .sort((a,b)=>a.timestamp-b.timestamp)
@@ -919,26 +1369,40 @@ async function exportClassToExcel(classId, opts){
       studentNameById[e.studentId] || '(removed student)',
       catLabel(e.category),
       subLabel(e.category, e.subtype) || '',
+      e.amount || 1,
       e.note || '',
       new Date(e.timestamp).toISOString()
     ]);
   const rawSheet = XLSX.utils.aoa_to_sheet([rawHeader, ...rawRows]);
   XLSX.utils.book_append_sheet(wb, rawSheet, 'Raw Log');
 
-  // Sheet 2: Class Summary (students x categories totals)
+  // Sheet 2: Roster (clean reference table of demographics)
+  const rosterHeader = ['Name','House','Gender','Homeroom Group','Homeroom Teacher','Active'];
+  const rosterRows = students.map(s=>[
+    s.name,
+    houseByKey(s.house) ? houseByKey(s.house).label : '',
+    genderByKey(s.gender) ? genderByKey(s.gender).label : '',
+    s.homeroomGroup || '',
+    s.homeroomTeacher || '',
+    s.active===false ? 'No' : 'Yes'
+  ]);
+  const rosterSheet = XLSX.utils.aoa_to_sheet([rosterHeader, ...rosterRows]);
+  XLSX.utils.book_append_sheet(wb, rosterSheet, 'Roster');
+
+  // Sheet 3: Class Summary (students x categories totals, amount-weighted)
   const rows = allRowKeys();
   const classCounts = {};
   students.forEach(s=> classCounts[s.id] = {});
   events.forEach(e=>{
     const k = e.category+'|'+e.subtype;
     if(!classCounts[e.studentId]) classCounts[e.studentId] = {};
-    classCounts[e.studentId][k] = (classCounts[e.studentId][k]||0)+1;
+    classCounts[e.studentId][k] = (classCounts[e.studentId][k]||0) + (e.amount||1);
   });
   const usedRowsClass = rows.filter(r=>{
     const k = r.category+'|'+r.subtype;
     return students.some(s=> (classCounts[s.id]||{})[k] > 0);
   });
-  const summaryHeader = ['Category', ...students.map(s=>s.name)];
+  const summaryHeader = ['Category', ...students.map(s=> studentHeaderLabel(s))];
   const summaryRows = usedRowsClass.map(r=>{
     const k = r.category+'|'+r.subtype;
     return [r.label, ...students.map(s=> (classCounts[s.id]||{})[k] || 0)];
@@ -946,9 +1410,29 @@ async function exportClassToExcel(classId, opts){
   const summarySheet = XLSX.utils.aoa_to_sheet([summaryHeader, ...summaryRows]);
   XLSX.utils.book_append_sheet(wb, summarySheet, 'Class Summary');
 
-  // Sheet per student: pivot (category rows x date cols)
+  // Sheet 4: House Balance (positive vs negative, by house)
+  const houseGroupsExport = {}; HOUSES.forEach(h=> houseGroupsExport[h.key]=[]);
+  let unassignedExport = [];
+  events.forEach(e=>{
+    const student = students.find(s=>s.id===e.studentId);
+    if(student && student.house && houseGroupsExport[student.house]) houseGroupsExport[student.house].push(e);
+    else unassignedExport.push(e);
+  });
+  const houseHeader = ['House','Positive','Negative'];
+  const houseRows = HOUSES.map(h=>{
+    const b = computeBalance(houseGroupsExport[h.key]);
+    return [h.label, b.pos, b.neg];
+  });
+  if(unassignedExport.length){
+    const b = computeBalance(unassignedExport);
+    houseRows.push(['Unassigned', b.pos, b.neg]);
+  }
+  const houseSheet = XLSX.utils.aoa_to_sheet([houseHeader, ...houseRows]);
+  XLSX.utils.book_append_sheet(wb, houseSheet, 'House Balance');
+
+  // Sheet per student: pivot (category rows x date cols, amount-weighted)
   const dates = [...new Set(sessions.map(s=>s.date))].sort();
-  const usedSheetNames = new Set(['Raw Log','Class Summary']);
+  const usedSheetNames = new Set(['Raw Log','Roster','Class Summary','House Balance']);
   for(const s of students){
     const studentEvents = events.filter(e=>e.studentId===s.id);
     if(studentEvents.length===0) continue;
@@ -958,7 +1442,7 @@ async function exportClassToExcel(classId, opts){
       if(!date) return;
       const k = e.category+'|'+e.subtype;
       if(!counts[k]) counts[k] = {};
-      counts[k][date] = (counts[k][date]||0)+1;
+      counts[k][date] = (counts[k][date]||0) + (e.amount||1);
     });
     const usedRowsS = rows.filter(r=>{
       const k = r.category+'|'+r.subtype;
