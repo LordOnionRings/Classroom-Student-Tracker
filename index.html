@@ -173,6 +173,35 @@ const GENDERS = [
 function genderByKey(key){ return GENDERS.find(g=>g.key===key) || null; }
 
 const HOMEROOM_GROUPS = ['Group 1', 'Group 2', 'Group 3'];
+
+/* ---- Auto-compute current grade level from a cohort's graduating year ---- */
+// Assumes a school year that ends mid-year (default cutoff: July) and that a cohort
+// graduates as Grade 12 at the end of its final year, e.g. cohort "2032-2033" graduates
+// in 2033. Works backward from today's date to say what grade that cohort is THIS year.
+function currentSchoolYearEndYear(date){
+  date = date || new Date();
+  const month = date.getMonth(); // 0 = Jan
+  const year = date.getFullYear();
+  return month >= 6 ? year + 1 : year; // Jul-Dec counts toward next calendar year's end
+}
+function cohortGraduationYear(cohort){
+  const range = String(cohort).match(/(\d{4})\s*-\s*(\d{4})/);
+  if(range) return parseInt(range[2], 10);
+  const single = String(cohort).match(/(\d{4})/);
+  return single ? parseInt(single[1], 10) : null;
+}
+function gradeForCohort(cohort, atDate){
+  const gradYear = cohortGraduationYear(cohort);
+  if(gradYear == null) return null;
+  const nowEnd = currentSchoolYearEndYear(atDate);
+  const grade = 12 - (gradYear - nowEnd);
+  if(grade < 1 || grade > 12) return null; // outside typical K-12 range — don't guess
+  return grade;
+}
+function cohortDisplayLabel(cohort, atDate){
+  const grade = gradeForCohort(cohort, atDate);
+  return grade != null ? `G${grade} (${cohort})` : cohort;
+}
 function avatarColor(student){
   const g = genderByKey(student && student.gender);
   return g ? g.color : '#8a94a6';
@@ -295,7 +324,9 @@ function normalizeGenderValue(v){
 }
 function normalizeHouseValue(v){
   const s = String(v||'').trim().toLowerCase();
-  const h = HOUSES.find(h=> h.key===s || h.label.toLowerCase()===s);
+  if(!s) return null;
+  // Tolerate things like "Jackal House", "jackal ", "Jac" (short forms), not just an exact match.
+  const h = HOUSES.find(h=> h.key===s || h.label.toLowerCase()===s || s.startsWith(h.key) || h.key.startsWith(s));
   return h ? h.key : null;
 }
 
@@ -539,6 +570,18 @@ function wireClassList(){
     try{
       const result = await importDirectoryFile(file);
       toast(`Imported ${result.totalStudents} students across ${result.cohortCount} cohort(s)`, 'good');
+      if(result.unrecognizedHouses && result.unrecognizedHouses.length){
+        const bySheet = {};
+        result.unrecognizedHouses.forEach(u=>{ bySheet[u.sheet] = (bySheet[u.sheet]||0)+1; });
+        const summary = Object.entries(bySheet).map(([sheet,count])=>`${sheet}: ${count}`).join(', ');
+        const example = result.unrecognizedHouses[0];
+        window.alert(
+          `Heads up: ${result.unrecognizedHouses.length} student(s) had a House value that wasn't recognized ` +
+          `(must be Jackal, Cobra, Iguana, or Dolphin) — ${summary}. Their house was left blank.\n\n` +
+          `Example: "${example.name}" in ${example.sheet} had House = "${example.rawValue}".\n\n` +
+          `If the cells actually just have a fill color and no typed house name, that won't be picked up — the text has to say the house name.`
+        );
+      }
     }catch(err){
       console.error(err);
       toast('Import failed — check the file format');
@@ -553,6 +596,7 @@ async function importDirectoryFile(file){
   const wb = XLSX.read(buf, {type:'array'});
   let totalStudents = 0;
   let cohortCount = 0;
+  const unrecognizedHouses = []; // {sheet, name, rawValue} — non-empty House cell we couldn't match
   for(const sheetName of wb.SheetNames){
     const sheet = wb.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(sheet, {defval:''});
@@ -572,6 +616,15 @@ async function importDirectoryFile(file){
       if(!id){
         id = 'auto:' + normalizeKey(sheetName) + ':' + normalizeKey(givenName) + ':' + normalizeKey(familyName);
       }
+      const rawHouse = getField(row,'House');
+      const house = normalizeHouseValue(rawHouse);
+      if(String(rawHouse).trim() && !house){
+        // Non-empty cell that didn't match any of the 4 house names — flag it rather than
+        // silently leaving the student with no house. Common cause: the sheet color-codes
+        // house membership with cell fill instead of typing the house name as text, which
+        // reads as blank to a program either way — but this at least catches typos/extra words.
+        unrecognizedHouses.push({ sheet: sheetName, name: givenName+' '+familyName, rawValue: String(rawHouse).trim() });
+      }
       const record = {
         id,
         cohort: sheetName,
@@ -579,7 +632,7 @@ async function importDirectoryFile(file){
         familyName,
         homeroomGroup: String(getField(row,'Homeroom Group','Group')).trim() || null,
         homeroomTeacher: String(getField(row,'Homeroom Teacher','Teacher')).trim() || null,
-        house: normalizeHouseValue(getField(row,'House')),
+        house,
         gender: normalizeGenderValue(getField(row,'Gender','Sex')),
         importedAt: Date.now()
       };
@@ -587,7 +640,7 @@ async function importDirectoryFile(file){
       totalStudents++;
     }
   }
-  return { totalStudents, cohortCount };
+  return { totalStudents, cohortCount, unrecognizedHouses };
 }
 
 /* ============ VIEW: ROSTER EDITOR ============ */
@@ -758,7 +811,11 @@ async function openAddFromDirectoryModal(){
 }
 
 function renderDirectoryCohortStep(backdrop, directoryEntries){
-  const cohorts = [...new Set(directoryEntries.map(d=>d.cohort))].sort();
+  const cohorts = [...new Set(directoryEntries.map(d=>d.cohort))].sort((a,b)=>{
+    const ga = gradeForCohort(a), gb = gradeForCohort(b);
+    if(ga != null && gb != null) return gb - ga; // highest current grade first
+    return a.localeCompare(b);
+  });
   const modalEl = backdrop.querySelector('.modal');
   modalEl.innerHTML = `
     <div class="modal-header">
@@ -766,7 +823,7 @@ function renderDirectoryCohortStep(backdrop, directoryEntries){
       <button class="icon-btn" id="close-directory-modal">&times;</button>
     </div>
     <div class="muted" style="margin-bottom:10px;">Choose a cohort</div>
-    ${cohorts.map(c=>`<button class="cat-btn" data-cohort="${escapeHtml(c)}">${escapeHtml(c)}</button>`).join('')}
+    ${cohorts.map(c=>`<button class="cat-btn" data-cohort="${escapeHtml(c)}">${escapeHtml(cohortDisplayLabel(c))}</button>`).join('')}
   `;
   modalEl.querySelector('#close-directory-modal').addEventListener('click', ()=>backdrop.remove());
   modalEl.querySelectorAll('[data-cohort]').forEach(el=>{
@@ -787,7 +844,7 @@ async function renderDirectoryStudentPickStep(backdrop, cohort, directoryEntries
   const modalEl = backdrop.querySelector('.modal');
   modalEl.innerHTML = `
     <div class="modal-header">
-      <h3>${escapeHtml(cohort)}</h3>
+      <h3>${escapeHtml(cohortDisplayLabel(cohort))}</h3>
       <button class="icon-btn" id="close-directory-modal2">&times;</button>
     </div>
     <div class="muted" style="margin-bottom:10px;">Select students to add to this class</div>
@@ -857,6 +914,7 @@ async function renderClassHome(){
       <button class="btn ghost" id="back-to-list">&larr; All Classes</button>
       <div class="row wrap">
         <button class="btn small" id="edit-roster-btn">Edit Roster</button>
+        <button class="btn small" id="rename-class-btn">Rename Class</button>
         <button class="btn small" id="archive-class-btn">${cls && cls.archived ? 'Unarchive Class' : 'Archive Class'}</button>
         <button class="btn small danger" id="delete-class-btn">Delete Class</button>
       </div>
@@ -872,6 +930,15 @@ function wireClassHome(){
   });
   document.getElementById('edit-roster-btn').addEventListener('click', ()=>{
     state.view='roster'; render();
+  });
+  document.getElementById('rename-class-btn').addEventListener('click', async ()=>{
+    const cls = await dbGet('classes', state.currentClassId);
+    const newName = window.prompt('Rename class', cls.name);
+    if(newName && newName.trim()){
+      cls.name = newName.trim();
+      await dbPut('classes', cls);
+      render();
+    }
   });
   document.getElementById('archive-class-btn').addEventListener('click', async ()=>{
     const cls = await dbGet('classes', state.currentClassId);
