@@ -441,6 +441,14 @@ async function render(){
 }
 
 /* ============ VIEW: CLASS LIST ============ */
+function classCardHtml(c, activeCount, archived){
+  return `
+    <div class="card clickable" data-open-class="${c.id}" style="${archived?'opacity:0.7;':''}">
+      <h3>${escapeHtml(c.name)}${archived?' <span class="muted" style="font-size:12px; font-weight:400;">(Archived)</span>':''}</h3>
+      <div class="muted">${activeCount} student${activeCount===1?'':'s'}</div>
+    </div>`;
+}
+
 async function renderClassList(){
   const classes = (await dbGetAll('classes')).sort((a,b)=>a.name.localeCompare(b.name));
   const directoryEntries = await dbGetAll('directory');
@@ -449,20 +457,33 @@ async function renderClassList(){
     ? `${directoryEntries.length} student${directoryEntries.length===1?'':'s'} across ${cohortSet.size} cohort${cohortSet.size===1?'':'s'}`
     : 'No directory imported yet';
 
-  let cardsHtml = '';
-  if(classes.length===0){
-    cardsHtml = `<div class="empty">No classes yet. Add your first class to get started.</div>`;
+  const activeClasses = classes.filter(c=>!c.archived);
+  const archivedClasses = classes.filter(c=>c.archived);
+
+  let activeCardsHtml = '';
+  if(activeClasses.length===0){
+    activeCardsHtml = `<div class="empty">No active classes yet. Add your first class to get started.</div>`;
   } else {
-    for(const c of classes){
+    for(const c of activeClasses){
       const students = await dbGetAllByIndex('students','classId', c.id);
       const activeCount = students.filter(s=>s.active!==false).length;
-      cardsHtml += `
-        <div class="card clickable" data-open-class="${c.id}">
-          <h3>${escapeHtml(c.name)}</h3>
-          <div class="muted">${activeCount} student${activeCount===1?'':'s'}</div>
-        </div>`;
+      activeCardsHtml += classCardHtml(c, activeCount, false);
     }
   }
+
+  let archivedSectionHtml = '';
+  if(archivedClasses.length){
+    let archivedCardsHtml = '';
+    for(const c of archivedClasses){
+      const students = await dbGetAllByIndex('students','classId', c.id);
+      const activeCount = students.filter(s=>s.active!==false).length;
+      archivedCardsHtml += classCardHtml(c, activeCount, true);
+    }
+    archivedSectionHtml = `
+      <h3 class="muted" style="margin-top:24px;">Archived Classes</h3>
+      <div class="grid-cards">${archivedCardsHtml}</div>`;
+  }
+
   return `
     <div class="topbar">
       <div class="title">Classroom Tracker</div>
@@ -486,7 +507,8 @@ async function renderClassList(){
         <button class="btn primary" id="add-class-btn">Add Class</button>
       </div>
     </div>
-    <div class="grid-cards">${cardsHtml}</div>
+    <div class="grid-cards">${activeCardsHtml}</div>
+    ${archivedSectionHtml}
   `;
 }
 function wireClassList(){
@@ -538,19 +560,27 @@ async function importDirectoryFile(file){
     cohortCount++;
     for(const rawRow of rows){
       const row = normalizeRow(rawRow);
-      const id = String(getField(row,'Student ID')).trim();
-      const givenName = String(getField(row,'Given Name')).trim();
-      const familyName = String(getField(row,'Family Name')).trim();
-      if(!id || !givenName) continue;
+      const givenName = String(getField(row,'Given Name','First Name')).trim();
+      if(!givenName) continue; // only a real name is required
+      const familyName = String(getField(row,'Family Name','Last Name','Surname')).trim();
+      // Student ID is optional — some teachers don't want ID numbers in the file at all.
+      // When it's missing, derive a stable-enough key from the name + cohort so re-imports
+      // of the same row still update in place instead of duplicating. The one tradeoff:
+      // correcting a name later will be treated as a new student rather than an update,
+      // since there's no ID to match on.
+      let id = String(getField(row,'Student ID','ID','StudentID','Student Number')).trim();
+      if(!id){
+        id = 'auto:' + normalizeKey(sheetName) + ':' + normalizeKey(givenName) + ':' + normalizeKey(familyName);
+      }
       const record = {
         id,
         cohort: sheetName,
         givenName,
         familyName,
-        homeroomGroup: String(getField(row,'Homeroom Group')).trim() || null,
-        homeroomTeacher: String(getField(row,'Homeroom Teacher')).trim() || null,
+        homeroomGroup: String(getField(row,'Homeroom Group','Group')).trim() || null,
+        homeroomTeacher: String(getField(row,'Homeroom Teacher','Teacher')).trim() || null,
         house: normalizeHouseValue(getField(row,'House')),
-        gender: normalizeGenderValue(getField(row,'Gender')),
+        gender: normalizeGenderValue(getField(row,'Gender','Sex')),
         importedAt: Date.now()
       };
       await dbPut('directory', record);
@@ -825,11 +855,13 @@ async function renderClassHome(){
   return `
     <div class="topbar">
       <button class="btn ghost" id="back-to-list">&larr; All Classes</button>
-      <div class="row">
+      <div class="row wrap">
         <button class="btn small" id="edit-roster-btn">Edit Roster</button>
+        <button class="btn small" id="archive-class-btn">${cls && cls.archived ? 'Unarchive Class' : 'Archive Class'}</button>
+        <button class="btn small danger" id="delete-class-btn">Delete Class</button>
       </div>
     </div>
-    <h2>${escapeHtml(cls ? cls.name : '')}</h2>
+    <h2>${escapeHtml(cls ? cls.name : '')}${cls && cls.archived ? ' <span class="muted" style="font-size:14px; font-weight:400;">(Archived)</span>' : ''}</h2>
     ${tabsHtml}
     ${body}
   `;
@@ -841,6 +873,25 @@ function wireClassHome(){
   document.getElementById('edit-roster-btn').addEventListener('click', ()=>{
     state.view='roster'; render();
   });
+  document.getElementById('archive-class-btn').addEventListener('click', async ()=>{
+    const cls = await dbGet('classes', state.currentClassId);
+    cls.archived = !cls.archived;
+    await dbPut('classes', cls);
+    toast(cls.archived ? 'Class archived' : 'Class unarchived', 'good');
+    render();
+  });
+  document.getElementById('delete-class-btn').addEventListener('click', async ()=>{
+    const cls = await dbGet('classes', state.currentClassId);
+    const ok = window.confirm(
+      `Delete "${cls.name}" completely? This permanently erases its roster, every logged session, and every event for this class. This cannot be undone.`
+    );
+    if(!ok) return;
+    await deleteClassCascade(state.currentClassId);
+    toast('Class deleted', 'good');
+    state.view = 'classList';
+    state.currentClassId = null;
+    render();
+  });
   document.querySelectorAll('[data-tab]').forEach(el=>{
     el.addEventListener('click', ()=>{
       state.activeTab = el.getAttribute('data-tab');
@@ -849,6 +900,17 @@ function wireClassHome(){
   });
   wireLogTabEvents();
   wireDataTabEvents();
+}
+
+/* ---- Cascade delete: wipes a class and everything under it ---- */
+async function deleteClassCascade(classId){
+  const students = await dbGetAllByIndex('students','classId', classId);
+  for(const s of students) await dbDelete('students', s.id);
+  const sessions = await dbGetAllByIndex('sessions','classId', classId);
+  for(const s of sessions) await dbDelete('sessions', s.id);
+  const events = await dbGetAllByIndex('events','classId', classId);
+  for(const e of events) await dbDelete('events', e.id);
+  await dbDelete('classes', classId);
 }
 
 /* ============ LOG TAB ============ */
