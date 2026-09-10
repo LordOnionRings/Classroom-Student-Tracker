@@ -138,6 +138,7 @@ const TAXONOMY = [
       {key:'off_topic', label:'Off-Topic'}
     ]},
   { key:'arrives_late', label:'Arrives Late', polarity:'negative', subtypes:null },
+  { key:'absent', label:'Absent', polarity:'negative', subtypes:null },
   { key:'sleeping', label:'Sleeping', polarity:'negative', subtypes:null },
   { key:'not_doing_work', label:'Not Doing Work', polarity:'negative', subtypes:null },
   { key:'disruptive', label:'Disruptive', polarity:'negative',
@@ -429,8 +430,11 @@ const state = {
   activeTab:'log',           // log | data
   dataSelectedStudentId:null,
   dataView:'student',        // student | classSummary
-  openSessionCache:null
+  openSessionCache:null,
+  lastPickedStudentId:null,  // most recent student chosen by "Pick a Student"
+  lastPickedAt:null          // timestamp of that pick, used to auto-tag their next answer as "called on"
 };
+const CALLED_ON_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 
 /* ============ SESSION LOGIC ============ */
 async function findTodaySession(classId){
@@ -1064,18 +1068,28 @@ function wireLogTabEvents(){
 
 /* ---- Random picker: unanswered students first, whole class once everyone has answered ---- */
 async function handlePickRandomStudent(){
-  const students = (await dbGetAllByIndex('students','classId', state.currentClassId))
+  const allActive = (await dbGetAllByIndex('students','classId', state.currentClassId))
     .filter(s=>s.active!==false);
-  if(students.length===0){ toast('No active students to pick from'); return; }
   const todaySession = await findTodaySession(state.currentClassId);
   const answeredIds = new Set();
+  const absentIds = new Set();
   if(todaySession){
     const events = await dbGetAllByIndex('events','sessionId', todaySession.id);
-    events.forEach(e=>{ if(e.category==='shares_idea') answeredIds.add(e.studentId); });
+    events.forEach(e=>{
+      if(e.category==='shares_idea') answeredIds.add(e.studentId);
+      if(e.category==='absent') absentIds.add(e.studentId);
+    });
   }
+  // Absent students aren't eligible to be called on at all, not just "already answered".
+  const students = allActive.filter(s=>!absentIds.has(s.id));
+  if(students.length===0){ toast('No students available to pick from (everyone active is marked absent)'); return; }
   const unanswered = students.filter(s=>!answeredIds.has(s.id));
   const pool = unanswered.length > 0 ? unanswered : students;
   const picked = pool[Math.floor(Math.random()*pool.length)];
+  // Remember who was just called on so the next Shares Idea from THEM specifically
+  // can be auto-tagged as "called on" rather than volunteered — no extra tap needed.
+  state.lastPickedStudentId = picked.id;
+  state.lastPickedAt = Date.now();
   const msg = unanswered.length > 0
     ? `Picked: ${picked.name} (${pool.length} of ${students.length} haven't answered yet)`
     : `Picked: ${picked.name} (everyone has answered — picked from full class of ${students.length})`;
@@ -1152,9 +1166,40 @@ async function logEvent(student, categoryKey, subKey, amount){
     id: uuid(), sessionId: session.id, classId: state.currentClassId, studentId: student.id,
     category: categoryKey, subtype: subKey || null, note:null, amount, timestamp: Date.now()
   };
+
+  // Called-on vs volunteered: if this student was the most recent "Pick a Student" result
+  // and we're still inside the answer window, tag this event as a called-on response.
+  const wasJustPicked = state.lastPickedStudentId === student.id
+    && state.lastPickedAt
+    && (Date.now() - state.lastPickedAt) < CALLED_ON_WINDOW_MS;
+  if(wasJustPicked){
+    if(categoryKey === 'shares_idea'){
+      ev.viaRandomPick = true;
+    }
+    // Whether they answered or something else got logged for them, the "just picked"
+    // moment is over — clear it so it doesn't attach to some unrelated event later.
+    state.lastPickedStudentId = null;
+    state.lastPickedAt = null;
+  }
+
   await dbAdd('events', ev);
-  toast(`${student.name}: ${rowLabel(categoryKey, subKey)}`, 'good');
+  toast(`${student.name}: ${rowLabel(categoryKey, subKey)}${ev.viaRandomPick ? ' (called on)' : ''}`, 'good');
+
+  const cat = TAXONOMY.find(t=>t.key===categoryKey);
+  if(cat && cat.polarity === 'negative'){
+    await checkNegativePatternAlert(student, categoryKey, subKey);
+  }
+
   render();
+}
+
+// Warn the teacher when a student hits a multiple of 3 for the SAME issue (all-time, this class).
+async function checkNegativePatternAlert(student, categoryKey, subKey){
+  const events = await dbGetAllByIndex('events','studentId', student.id);
+  const count = events.filter(e => e.category === categoryKey && (e.subtype || null) === (subKey || null)).length;
+  if(count > 0 && count % 3 === 0){
+    window.alert(`Heads up: ${student.name} now has ${count} "${rowLabel(categoryKey, subKey)}" entries. Might be worth addressing.`);
+  }
 }
 
 /* ---- End of Class flow ---- */
@@ -1488,7 +1533,7 @@ async function exportClassToExcel(classId, opts){
   const wb = XLSX.utils.book_new();
 
   // Sheet 1: Raw Log
-  const rawHeader = ['Date','Session ID','Student','Category','Subtype','Amount','Note','Timestamp'];
+  const rawHeader = ['Date','Session ID','Student','Category','Subtype','Called On','Amount','Note','Timestamp'];
   const rawRows = events
     .slice()
     .sort((a,b)=>a.timestamp-b.timestamp)
@@ -1498,6 +1543,7 @@ async function exportClassToExcel(classId, opts){
       studentNameById[e.studentId] || '(removed student)',
       catLabel(e.category),
       subLabel(e.category, e.subtype) || '',
+      e.viaRandomPick ? 'Yes' : '',
       e.amount || 1,
       e.note || '',
       new Date(e.timestamp).toISOString()
