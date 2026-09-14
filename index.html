@@ -284,6 +284,31 @@ function formatDateNice(dstr){
   const dt = new Date(y, m-1, d);
   return dt.toLocaleDateString(undefined,{month:'short', day:'numeric', year:'numeric'});
 }
+function dateStrToDate(dstr){
+  const [y,m,d] = dstr.split('-').map(Number);
+  return new Date(y, m-1, d);
+}
+function dateToDateStr(dt){
+  return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+}
+function addDaysToDateStr(dstr, days){
+  const dt = dateStrToDate(dstr);
+  dt.setDate(dt.getDate()+days);
+  return dateToDateStr(dt);
+}
+function mondayOfWeekContaining(dstr){
+  const dt = dateStrToDate(dstr);
+  const dow = dt.getDay(); // 0=Sun..6=Sat
+  const diffToMonday = (dow===0) ? -6 : (1-dow);
+  dt.setDate(dt.getDate()+diffToMonday);
+  return dateToDateStr(dt);
+}
+function reportWeekRange(offsetWeeks){
+  const thisMonday = mondayOfWeekContaining(todayStr());
+  const start = addDaysToDateStr(thisMonday, (offsetWeeks||0)*7);
+  const end = addDaysToDateStr(start, 6);
+  return { start, end };
+}
 function initials(name){
   return name.trim().split(/\s+/).map(p=>p[0]).slice(0,2).join('').toUpperCase();
 }
@@ -432,7 +457,8 @@ const state = {
   dataView:'student',        // student | classSummary
   openSessionCache:null,
   lastPickedStudentId:null,  // most recent student chosen by "Pick a Student"
-  lastPickedAt:null          // timestamp of that pick, used to auto-tag their next answer as "called on"
+  lastPickedAt:null,         // timestamp of that pick, used to auto-tag their next answer as "called on"
+  reportWeekOffset:0         // 0 = this week, -1 = last week, etc. (Weekly Report tab)
 };
 const CALLED_ON_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -908,11 +934,14 @@ async function renderClassHome(){
   const tabsHtml = `
     <div class="tabs">
       <div class="tab ${state.activeTab==='log'?'active':''}" data-tab="log">Log</div>
+      <div class="tab ${state.activeTab==='report'?'active':''}" data-tab="report">Weekly Report</div>
       <div class="tab ${state.activeTab==='data'?'active':''}" data-tab="data">Data</div>
     </div>`;
   const body = state.activeTab==='log'
     ? await renderLogTab(todaySession)
-    : await renderDataTab();
+    : state.activeTab==='report'
+      ? await renderReportTab()
+      : await renderDataTab();
   return `
     <div class="topbar">
       <button class="btn ghost" id="back-to-list">&larr; All Classes</button>
@@ -971,6 +1000,7 @@ function wireClassHome(){
   });
   wireLogTabEvents();
   wireDataTabEvents();
+  wireReportTabEvents();
 }
 
 /* ---- Cascade delete: wipes a class and everything under it ---- */
@@ -1498,6 +1528,196 @@ async function renderClassSummaryPivot(students){
       <thead><tr><th class="rowlabel">Category</th>${theadCols}</tr></thead>
       <tbody>${tbodyRows}</tbody>
     </table></div>`;
+}
+
+/* ============ WEEKLY REPORT ============ */
+// Picks the negative category with the highest combined (this week + last week) count,
+// tie-broken by this week's count, then alphabetically by label.
+function pickDominantCategory(combinedByCategory, thisWeekByCategory){
+  let bestKey = null;
+  Object.keys(combinedByCategory).forEach(k=>{
+    if(!bestKey){ bestKey = k; return; }
+    const cur = combinedByCategory[k], best = combinedByCategory[bestKey];
+    if(cur > best){ bestKey = k; return; }
+    if(cur === best){
+      const curThis = thisWeekByCategory[k]||0, bestThis = thisWeekByCategory[bestKey]||0;
+      if(curThis > bestThis){ bestKey = k; return; }
+      if(curThis === bestThis && catLabel(k) < catLabel(bestKey)) bestKey = k;
+    }
+  });
+  return bestKey;
+}
+
+async function computeWeeklyReport(classId, start, end){
+  const prevStart = addDaysToDateStr(start, -7);
+  const prevEnd = addDaysToDateStr(start, -1);
+
+  const [students, sessions, events] = await Promise.all([
+    dbGetAllByIndex('students','classId', classId),
+    dbGetAllByIndex('sessions','classId', classId),
+    dbGetAllByIndex('events','classId', classId)
+  ]);
+  const activeStudents = students.filter(s=>s.active!==false);
+  const sessionById = {}; sessions.forEach(s=> sessionById[s.id]=s);
+  const inRange = (dateStr, a, b) => dateStr >= a && dateStr <= b;
+
+  const perStudent = {};
+  activeStudents.forEach(s=>{
+    perStudent[s.id] = {
+      student: s,
+      thisWeekNegByCategory:{}, thisWeekNegTotal:0,
+      prevWeekNegByCategory:{}, prevWeekNegTotal:0,
+      thisWeekSharesIdeaCount:0, thisWeekSharesIdeaScore:0
+    };
+  });
+
+  const negativeKeys = new Set(TAXONOMY.filter(t=>t.polarity==='negative').map(t=>t.key));
+
+  events.forEach(e=>{
+    const sess = sessionById[e.sessionId];
+    if(!sess) return;
+    const rec = perStudent[e.studentId];
+    if(!rec) return; // student no longer on the active roster
+    if(inRange(sess.date, start, end)){
+      if(negativeKeys.has(e.category)){
+        rec.thisWeekNegByCategory[e.category] = (rec.thisWeekNegByCategory[e.category]||0)+1;
+        rec.thisWeekNegTotal++;
+      }
+      if(e.category==='shares_idea'){
+        rec.thisWeekSharesIdeaCount++;
+        rec.thisWeekSharesIdeaScore += eventSignedValue(e);
+      }
+    } else if(inRange(sess.date, prevStart, prevEnd)){
+      if(negativeKeys.has(e.category)){
+        rec.prevWeekNegByCategory[e.category] = (rec.prevWeekNegByCategory[e.category]||0)+1;
+        rec.prevWeekNegTotal++;
+      }
+    }
+  });
+
+  // Top 3 Performers: clean behavior this week AND actually participated (silence doesn't count as good).
+  const performers = Object.values(perStudent)
+    .filter(r=> r.thisWeekNegTotal===0 && r.thisWeekSharesIdeaCount>0)
+    .sort((a,b)=> b.thisWeekSharesIdeaScore - a.thisWeekSharesIdeaScore
+                || b.thisWeekSharesIdeaCount - a.thisWeekSharesIdeaCount
+                || a.student.name.localeCompare(b.student.name))
+    .slice(0,3);
+
+  // 3 Students to Watch: ranked on a 2-week combined total so a sustained/building issue outranks a one-off.
+  const watch = Object.values(perStudent)
+    .map(r=>{
+      const combinedByCategory = {};
+      Object.keys(r.thisWeekNegByCategory).forEach(k=> combinedByCategory[k]=(combinedByCategory[k]||0)+r.thisWeekNegByCategory[k]);
+      Object.keys(r.prevWeekNegByCategory).forEach(k=> combinedByCategory[k]=(combinedByCategory[k]||0)+r.prevWeekNegByCategory[k]);
+      const dominantKey = pickDominantCategory(combinedByCategory, r.thisWeekNegByCategory);
+      const dominantThisWeek = dominantKey ? (r.thisWeekNegByCategory[dominantKey]||0) : 0;
+      const dominantPrevWeek = dominantKey ? (r.prevWeekNegByCategory[dominantKey]||0) : 0;
+      return {
+        student: r.student,
+        combinedTotal: r.thisWeekNegTotal + r.prevWeekNegTotal,
+        thisWeekNegTotal: r.thisWeekNegTotal,
+        dominantKey, dominantThisWeek, dominantPrevWeek,
+        hasOtherIssues: (r.thisWeekNegTotal + r.prevWeekNegTotal) > (dominantThisWeek + dominantPrevWeek)
+      };
+    })
+    .filter(r=> r.combinedTotal>0)
+    .sort((a,b)=> b.combinedTotal - a.combinedTotal
+                || b.thisWeekNegTotal - a.thisWeekNegTotal
+                || a.student.name.localeCompare(b.student.name))
+    .slice(0,3);
+
+  // Student of the Class picks logged this week
+  const sotcPicks = sessions
+    .filter(s=> inRange(s.date, start, end) && s.studentOfClassId)
+    .sort((a,b)=> a.date.localeCompare(b.date))
+    .map(s=>{
+      const rec = perStudent[s.studentOfClassId];
+      const student = rec ? rec.student : students.find(x=>x.id===s.studentOfClassId);
+      return { date: s.date, studentName: student ? student.name : '(removed student)' };
+    });
+
+  return { start, end, performers, watch, sotcPicks };
+}
+
+async function renderReportTab(){
+  const range = reportWeekRange(state.reportWeekOffset);
+  const report = await computeWeeklyReport(state.currentClassId, range.start, range.end);
+
+  const navHtml = `
+    <div class="row between" style="margin-bottom:14px;">
+      <button class="btn small" id="report-prev-week">&larr; Previous Week</button>
+      <strong>${formatDateNice(range.start)} &ndash; ${formatDateNice(range.end)}</strong>
+      <button class="btn small" id="report-next-week" ${state.reportWeekOffset>=0 ? 'disabled' : ''}>Next Week &rarr;</button>
+    </div>`;
+
+  const performersHtml = report.performers.length
+    ? report.performers.map((r,i)=>`
+        <div class="card">
+          <div class="row between">
+            <strong>${i+1}. ${escapeHtml(r.student.name)}</strong>
+            <span class="tag positive">Clean week</span>
+          </div>
+          <div class="muted" style="margin-top:4px;">${r.thisWeekSharesIdeaCount} contribution${r.thisWeekSharesIdeaCount===1?'':'s'} this week, no behavior entries logged</div>
+        </div>`).join('')
+    : `<div class="empty">No student fully met the bar this week (clean behavior + at least one contribution).</div>`;
+
+  const watchHtml = report.watch.length
+    ? report.watch.map((r,i)=>`
+        <div class="card">
+          <div class="row between">
+            <strong>${i+1}. ${escapeHtml(r.student.name)}</strong>
+            <span class="tag negative">${r.dominantKey ? escapeHtml(catLabel(r.dominantKey)) : ''}</span>
+          </div>
+          <div class="muted" style="margin-top:4px;">${r.dominantThisWeek} this week, ${r.dominantPrevWeek} last week${r.hasOtherIssues ? ' (plus other issues)' : ''}</div>
+        </div>`).join('')
+    : `<div class="empty">No students flagged over the last two weeks.</div>`;
+
+  const sotcHtml = report.sotcPicks.length
+    ? report.sotcPicks.map(p=>`
+        <div class="row" style="padding:6px 0;">
+          <span class="muted" style="min-width:100px;">${formatDateNice(p.date)}</span>
+          <strong>${escapeHtml(p.studentName)}</strong>
+        </div>`).join('')
+    : `<div class="empty">No Student of the Class picks logged this week.</div>`;
+
+  return `
+    ${navHtml}
+    <h3>Top 3 Performers</h3>
+    ${performersHtml}
+
+    <h3 style="margin-top:22px;">Students of the Class This Week</h3>
+    <div class="card">
+      ${sotcHtml}
+      <div class="muted" style="margin-top:10px; padding-top:10px; border-top:1px solid var(--line);">
+        A Student of the Class pick isn't automatically a top performer &mdash; picks are intentionally rotated across the class, not just given to the strongest week.
+      </div>
+    </div>
+
+    <h3 style="margin-top:22px;">3 Students to Watch</h3>
+    <div class="muted" style="margin-bottom:8px;">Based on this week and last week combined, to catch issues that are building rather than a single bad day.</div>
+    ${watchHtml}
+
+    <div class="row" style="margin-top:22px;">
+      <button class="btn small" id="export-now-btn-report">Export Detailed Excel Report</button>
+    </div>
+  `;
+}
+
+function wireReportTabEvents(){
+  const prevBtn = document.getElementById('report-prev-week');
+  if(prevBtn) prevBtn.addEventListener('click', ()=>{
+    state.reportWeekOffset = (state.reportWeekOffset||0) - 1;
+    render();
+  });
+  const nextBtn = document.getElementById('report-next-week');
+  if(nextBtn) nextBtn.addEventListener('click', ()=>{
+    if((state.reportWeekOffset||0) < 0){
+      state.reportWeekOffset = (state.reportWeekOffset||0) + 1;
+      render();
+    }
+  });
+  const exportBtn = document.getElementById('export-now-btn-report');
+  if(exportBtn) exportBtn.addEventListener('click', ()=> exportClassToExcel(state.currentClassId, {silent:false}));
 }
 
 function wireDataTabEvents(){
