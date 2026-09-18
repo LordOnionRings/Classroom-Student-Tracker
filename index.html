@@ -96,6 +96,13 @@
   .tag.neutral{background:#e7e9ee; color:#4b5563;}
   .tag.negative{background:#fbe4e1; color:var(--bad);}
   .tag.positive{background:#e2f5e9; color:var(--good);}
+  .tag.warn{background:#fff4e5; color:var(--warn);}
+  #print-area{display:none;}
+  @media print{
+    body > *:not(#print-area){display:none !important;}
+    #print-area{display:block !important;}
+    .wa-print-page{page-break-after:always;}
+  }
   .chip{
     display:inline-flex; padding:9px 14px; border-radius:20px; border:1px solid var(--line); background:#fff;
     font-size:14px; font-weight:600; cursor:pointer; margin:0 8px 8px 0;
@@ -265,6 +272,61 @@ function buildBreakoutGroups(students, groupSize, genderMode, houseMode){
     label: `Group ${i+1}`,
     studentIds: studentList.map(s=>s.id)
   }));
+}
+
+/* ============ WRITING ASSESSMENT ============ */
+const WRITING_TYPES = ['Compare and Contrast','Unseen Extract','Analysis Essay','Argumentative Essay','Other'];
+const WRITING_ASSESSMENT_METHODS = [
+  { key:'comments', label:'Comments' },
+  { key:'myp_scale', label:'MYP Grading Scale (1–8)' },
+  { key:'dp_scale', label:'DP Grading Scale (1–7)' },
+  { key:'be_ae_me_ee', label:'BE / AE / ME / EE' }
+];
+// Core 10 apply to every assessment; the DP-level 5 only show up when the assessment's
+// methods include the DP Grading Scale (higher-level analytical skills aren't relevant
+// to earlier MYP writing).
+const WRITING_SKILLS_NEGATIVE = [
+  { key:'missing_thesis', label:'Missing Thesis' },
+  { key:'unclear_thesis', label:'Unclear Thesis' },
+  { key:'poor_organization', label:'Poor Organization' },
+  { key:'weak_topic_sentences', label:'Weak Topic Sentences' },
+  { key:'inconsistent_verb_tense', label:'Inconsistent Verb Tense' },
+  { key:'weak_evidence', label:'Weak Evidence' },
+  { key:'missing_peel', label:'Missing PEEL Structure' },
+  { key:'poor_punctuation', label:'Poor Punctuation' },
+  { key:'inconsistent_word_choice', label:'Inconsistent Word Choice' },
+  { key:'weak_conclusion', label:'Weak Conclusion' },
+  { key:'ignores_counterarguments', label:'Ignores Counterarguments', dpOnly:true },
+  { key:'descriptive_not_analytical', label:'Descriptive Not Analytical', dpOnly:true },
+  { key:'weak_quote_integration', label:'Weak Quote Integration', dpOnly:true },
+  { key:'missing_key_context', label:'Missing Key Context', dpOnly:true },
+  { key:'irrelevant_context', label:'Irrelevant Context or Arguments', dpOnly:true }
+];
+const WRITING_SKILLS_POSITIVE = [
+  { key:'clear_thesis', label:'Clear Thesis' },
+  { key:'strong_organization', label:'Strong Organization' },
+  { key:'strong_topic_sentences', label:'Strong Topic Sentences' },
+  { key:'consistent_verb_tense', label:'Consistent Verb Tense' },
+  { key:'strong_evidence', label:'Strong Evidence' },
+  { key:'uses_peel', label:'Uses PEEL Structure' },
+  { key:'strong_punctuation', label:'Strong Punctuation' },
+  { key:'precise_word_choice', label:'Precise Word Choice' },
+  { key:'strong_conclusion', label:'Strong Conclusion' },
+  { key:'focused_argument', label:'Focused Argument' },
+  { key:'engages_counterarguments', label:'Engages Counterarguments', dpOnly:true },
+  { key:'strong_analysis', label:'Strong Analysis', dpOnly:true },
+  { key:'strong_quote_integration', label:'Strong Quote Integration', dpOnly:true },
+  { key:'relevant_outside_context', label:'Includes Relevant Outside Context', dpOnly:true },
+  { key:'nuanced_reasoning', label:'Nuanced Reasoning', dpOnly:true }
+];
+function writingSkillsForAssessment(assessment, list){
+  const includeDp = assessment && assessment.methods && assessment.methods.includes('dp_scale');
+  return list.filter(s=> !s.dpOnly || includeDp);
+}
+function writingSkillLabel(polarity, key){
+  const list = polarity==='positive' ? WRITING_SKILLS_POSITIVE : WRITING_SKILLS_NEGATIVE;
+  const s = list.find(x=>x.key===key);
+  return s ? s.label : key;
 }
 
 /* ---- Auto-compute current grade level from a cohort's graduating year ---- */
@@ -450,7 +512,7 @@ function normalizeHouseValue(v){
 
 /* ============ INDEXEDDB LAYER ============ */
 const DB_NAME = 'classroomTrackerDB';
-const DB_VERSION = 2; // v2 adds the 'directory' store; existing stores are untouched on upgrade
+const DB_VERSION = 3; // v3 adds the writing-assessment stores; existing stores are untouched on upgrade
 
 function openDB(){
   if(openDB._p) return openDB._p;
@@ -478,6 +540,21 @@ function openDB(){
       if(!db.objectStoreNames.contains('directory')){
         const s = db.createObjectStore('directory', {keyPath:'id'});
         s.createIndex('cohort','cohort',{unique:false});
+      }
+      if(!db.objectStoreNames.contains('writingAssessments')){
+        const s = db.createObjectStore('writingAssessments', {keyPath:'id'});
+        s.createIndex('classId','classId',{unique:false});
+      }
+      if(!db.objectStoreNames.contains('writingEvents')){
+        const s = db.createObjectStore('writingEvents', {keyPath:'id'});
+        s.createIndex('assessmentId','assessmentId',{unique:false});
+        s.createIndex('studentId','studentId',{unique:false});
+        s.createIndex('classId','classId',{unique:false});
+      }
+      if(!db.objectStoreNames.contains('writingFeedback')){
+        const s = db.createObjectStore('writingFeedback', {keyPath:'id'});
+        s.createIndex('assessmentId','assessmentId',{unique:false});
+        s.createIndex('studentId','studentId',{unique:false});
       }
     };
     req.onsuccess = (e)=> resolve(e.target.result);
@@ -551,7 +628,11 @@ const state = {
   lastPickedStudentId:null,  // most recent student chosen by "Pick a Student"
   lastPickedAt:null,         // timestamp of that pick, used to auto-tag their next answer as "called on"
   reportWeekOffset:0,        // 0 = this week, -1 = last week, etc. (Weekly Report tab)
-  groupCarryoverDismissed:false // suppresses the "continue in groups?" banner once dismissed this app session
+  groupCarryoverDismissed:false, // suppresses the "continue in groups?" banner once dismissed this app session
+  writingView:'list',        // list | detail | student
+  writingSelectedAssessmentId:null,
+  writingSelectedStudentId:null,
+  writingStudentMode:null    // null (auto: report if submitted else edit) | edit | review | report
 };
 const CALLED_ON_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -1028,13 +1109,16 @@ async function renderClassHome(){
     <div class="tabs">
       <div class="tab ${state.activeTab==='log'?'active':''}" data-tab="log">Log</div>
       <div class="tab ${state.activeTab==='report'?'active':''}" data-tab="report">Weekly Report</div>
+      <div class="tab ${state.activeTab==='writing'?'active':''}" data-tab="writing">Writing Assessment</div>
       <div class="tab ${state.activeTab==='data'?'active':''}" data-tab="data">Data</div>
     </div>`;
   const body = state.activeTab==='log'
     ? await renderLogTab(todaySession)
     : state.activeTab==='report'
       ? await renderReportTab()
-      : await renderDataTab();
+      : state.activeTab==='writing'
+        ? await renderWritingTab()
+        : await renderDataTab();
   return `
     <div class="topbar">
       <button class="btn ghost" id="back-to-list">&larr; All Classes</button>
@@ -1094,6 +1178,7 @@ function wireClassHome(){
   wireLogTabEvents();
   wireDataTabEvents();
   wireReportTabEvents();
+  wireWritingTabEvents();
 }
 
 /* ---- Cascade delete: wipes a class and everything under it ---- */
@@ -1986,6 +2071,581 @@ function wireDataTabEvents(){
   if(exportBtn){
     exportBtn.addEventListener('click', ()=> exportClassToExcel(state.currentClassId, {silent:false}));
   }
+}
+
+/* ============ WRITING ASSESSMENT: data helpers ============ */
+async function getWritingFeedbackRecord(assessmentId, studentId){
+  const all = await dbGetAllByIndex('writingFeedback','assessmentId', assessmentId);
+  return all.find(f=>f.studentId===studentId) || null;
+}
+async function getOrCreateWritingFeedbackRecord(assessmentId, classId, studentId){
+  let rec = await getWritingFeedbackRecord(assessmentId, studentId);
+  if(rec) return rec;
+  rec = { id: uuid(), assessmentId, classId, studentId, comment:'', scores:{dp:null,myp:null,level:null}, submittedAt:null, updatedAt: Date.now() };
+  await dbAdd('writingFeedback', rec);
+  return rec;
+}
+async function computeWritingTally(assessmentId, studentId){
+  const events = (await dbGetAllByIndex('writingEvents','assessmentId', assessmentId)).filter(e=>e.studentId===studentId);
+  const neg = {}, pos = {};
+  events.forEach(e=>{
+    const bucket = e.polarity==='positive' ? pos : neg;
+    if(!bucket[e.skillKey]) bucket[e.skillKey] = { count:0, quotes:[] };
+    bucket[e.skillKey].count++;
+    if(e.quote) bucket[e.skillKey].quotes.push(e.quote);
+  });
+  return { neg, pos, events };
+}
+async function computeWritingStatus(assessmentId, studentId){
+  const rec = await getWritingFeedbackRecord(assessmentId, studentId);
+  if(rec && rec.submittedAt) return 'submitted';
+  const events = (await dbGetAllByIndex('writingEvents','assessmentId', assessmentId)).filter(e=>e.studentId===studentId);
+  const hasComment = rec && rec.comment && rec.comment.trim();
+  const hasScore = rec && rec.scores && Object.values(rec.scores).some(v=>v!=null);
+  if(events.length>0 || hasComment || hasScore) return 'in_progress';
+  return 'unassessed';
+}
+
+/* ============ WRITING ASSESSMENT: rendering ============ */
+function writingReportContentHtml(assessment, student, feedback, tally){
+  const renderBucket = (bucket, polarity) => {
+    const keys = Object.keys(bucket);
+    if(keys.length===0) return '<div class="muted">None logged.</div>';
+    return keys.map(key=>{
+      const t = bucket[key];
+      const quotesHtml = t.quotes.length
+        ? `<ul style="margin:4px 0 0 18px;">${t.quotes.map(q=>`<li>&ldquo;${escapeHtml(q)}&rdquo;</li>`).join('')}</ul>`
+        : '';
+      return `<div style="margin-bottom:8px;"><strong>${escapeHtml(writingSkillLabel(polarity, key))}</strong> <span class="muted">&times;${t.count}</span>${quotesHtml}</div>`;
+    }).join('');
+  };
+  const scoreLines = [];
+  if(feedback.scores){
+    if(feedback.scores.dp != null) scoreLines.push(`DP Score: ${feedback.scores.dp} / 7`);
+    if(feedback.scores.myp != null) scoreLines.push(`MYP Score: ${feedback.scores.myp} / 8`);
+    if(feedback.scores.level) scoreLines.push(`Level: ${escapeHtml(feedback.scores.level)}`);
+  }
+  return `
+    <h3>${escapeHtml(assessment.title)}</h3>
+    <div class="muted" style="margin-bottom:10px;">${escapeHtml(student.name)} &middot; Due ${formatDateNice(assessment.dueDate)}</div>
+    ${assessment.prompt ? `<div class="card" style="margin-bottom:14px;"><em>${escapeHtml(assessment.prompt)}</em></div>` : ''}
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+      <div>
+        <h4 style="color:var(--bad);">Areas for Improvement</h4>
+        ${renderBucket(tally.neg, 'negative')}
+      </div>
+      <div>
+        <h4 style="color:var(--good);">Writing Successes</h4>
+        ${renderBucket(tally.pos, 'positive')}
+      </div>
+    </div>
+    ${feedback.comment ? `<h4 style="margin-top:16px;">Comments</h4><p>${escapeHtml(feedback.comment)}</p>` : ''}
+    ${scoreLines.length ? `<h4 style="margin-top:16px;">Score</h4><p>${scoreLines.join(' &middot; ')}</p>` : ''}
+  `;
+}
+
+async function renderWritingTab(){
+  if(state.writingView==='detail' && state.writingSelectedAssessmentId){
+    return await renderWritingAssessmentDetail(state.writingSelectedAssessmentId);
+  }
+  if(state.writingView==='student' && state.writingSelectedAssessmentId && state.writingSelectedStudentId){
+    return await renderWritingStudentPage(state.writingSelectedAssessmentId, state.writingSelectedStudentId);
+  }
+  return await renderWritingAssessmentList();
+}
+
+async function renderWritingAssessmentList(){
+  const assessments = (await dbGetAllByIndex('writingAssessments','classId', state.currentClassId))
+    .sort((a,b)=> b.createdAt - a.createdAt);
+  const addBtn = `<button class="btn primary" id="add-writing-assessment-btn">+ Add Writing Assessment</button>`;
+  if(assessments.length===0){
+    return `<div class="empty">No writing assessments yet for this class.</div><div class="row" style="margin-top:12px;">${addBtn}</div>`;
+  }
+  const students = (await dbGetAllByIndex('students','classId', state.currentClassId)).filter(s=>s.active!==false);
+  const cardsHtml = [];
+  for(const a of assessments){
+    let submitted = 0;
+    for(const s of students){
+      if(await computeWritingStatus(a.id, s.id) === 'submitted') submitted++;
+    }
+    const pct = students.length ? Math.round(100*submitted/students.length) : 0;
+    cardsHtml.push(`
+      <div class="card clickable" data-open-assessment="${a.id}">
+        <div class="row between">
+          <strong>${escapeHtml(a.title)}</strong>
+          <span class="tag neutral">${a.type==='summative'?'Summative':'Formative'}</span>
+        </div>
+        <div class="muted" style="margin-top:4px;">Due ${formatDateNice(a.dueDate)} &middot; ${submitted}/${students.length} complete (${pct}%)</div>
+      </div>`);
+  }
+  return `<div class="row" style="margin-bottom:14px;">${addBtn}</div><div class="grid-cards">${cardsHtml.join('')}</div>`;
+}
+
+async function renderWritingAssessmentDetail(assessmentId){
+  const assessment = await dbGet('writingAssessments', assessmentId);
+  if(!assessment){
+    state.writingView = 'list'; state.writingSelectedAssessmentId = null;
+    return await renderWritingAssessmentList();
+  }
+  const students = (await dbGetAllByIndex('students','classId', state.currentClassId))
+    .filter(s=>s.active!==false).sort((a,b)=>a.name.localeCompare(b.name));
+  const statusMeta = {
+    unassessed:{label:'Unassessed', cls:'negative'},
+    in_progress:{label:'In Progress', cls:'warn'},
+    submitted:{label:'Feedback Complete', cls:'positive'}
+  };
+  const rows = [];
+  let submittedCount = 0;
+  for(const s of students){
+    const status = await computeWritingStatus(assessmentId, s.id);
+    if(status==='submitted') submittedCount++;
+    const meta = statusMeta[status];
+    rows.push(`
+      <div class="card row between" data-open-student="${s.id}" style="cursor:pointer;">
+        <span>${escapeHtml(s.name)}</span>
+        <div class="row">
+          <span class="tag ${meta.cls}">${meta.label}</span>
+          ${status==='submitted' ? `<button class="btn small ghost" data-view-report="${s.id}">View Report</button>` : ''}
+        </div>
+      </div>`);
+  }
+  const pct = students.length ? Math.round(100*submittedCount/students.length) : 0;
+  return `
+    <div class="row between" style="margin-bottom:10px;">
+      <button class="btn ghost" id="back-to-writing-list">&larr; All Assessments</button>
+      <button class="btn small" id="export-all-writing-btn">Export All Reports (PDF)</button>
+    </div>
+    <h3>${escapeHtml(assessment.title)}</h3>
+    <div class="muted" style="margin-bottom:14px;">
+      ${assessment.type==='summative'?'Summative':'Formative'} &middot; ${assessment.mode==='in_class_timed'?'In-Class Timed':'Take Home'} &middot; Due ${formatDateNice(assessment.dueDate)} &middot; ${submittedCount}/${students.length} complete (${pct}%)
+    </div>
+    ${rows.join('')}
+  `;
+}
+
+async function renderWritingStudentPage(assessmentId, studentId){
+  const assessment = await dbGet('writingAssessments', assessmentId);
+  const student = await dbGet('students', studentId);
+  if(!assessment || !student){
+    state.writingView = 'detail'; state.writingSelectedStudentId = null;
+    return await renderWritingAssessmentDetail(assessmentId);
+  }
+  const feedback = await getOrCreateWritingFeedbackRecord(assessmentId, state.currentClassId, studentId);
+  const tally = await computeWritingTally(assessmentId, studentId);
+  const mode = state.writingStudentMode || (feedback.submittedAt ? 'report' : 'edit');
+  const backBtn = `<button class="btn ghost" id="back-to-writing-detail">&larr; ${escapeHtml(assessment.title)}</button>`;
+
+  if(mode==='report' || mode==='review'){
+    const actionsHtml = mode==='report'
+      ? `<div class="row" style="margin-top:16px;">
+           <button class="btn small" id="wa-edit-feedback-btn">Edit Feedback</button>
+           <button class="btn small ghost" id="wa-export-report-btn">Export PDF</button>
+         </div>`
+      : `<div class="row" style="margin-top:16px;">
+           <button class="btn ghost" id="wa-back-to-edit-btn">&larr; Go Back and Edit</button>
+           <button class="btn primary" id="wa-submit-feedback-btn">${feedback.submittedAt ? 'Save Changes' : 'Submit Feedback'}</button>
+         </div>`;
+    return `${backBtn}<div class="card" style="margin-top:10px;">${writingReportContentHtml(assessment, student, feedback, tally)}</div>${actionsHtml}`;
+  }
+
+  const negSkills = writingSkillsForAssessment(assessment, WRITING_SKILLS_NEGATIVE);
+  const posSkills = writingSkillsForAssessment(assessment, WRITING_SKILLS_POSITIVE);
+  const skillButtonHtml = (skill, polarity) => {
+    const bucket = polarity==='negative' ? tally.neg : tally.pos;
+    const t = bucket[skill.key];
+    const count = t ? t.count : 0;
+    return `
+      <div class="cat-btn" style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;" data-wa-skill="${skill.key}" data-wa-polarity="${polarity}">
+        <span>${escapeHtml(skill.label)}</span>
+        <span class="row" style="gap:8px;">
+          ${count ? `<span class="event-badge" style="position:static;">${count}</span>` : ''}
+          ${count ? `<span class="btn ghost" style="padding:2px 8px; font-size:12px;" data-wa-manage="${skill.key}" data-wa-manage-polarity="${polarity}">Manage</span>` : ''}
+        </span>
+      </div>`;
+  };
+
+  const scoreSectionsHtml = [];
+  if(assessment.methods.includes('dp_scale')){
+    scoreSectionsHtml.push(`
+      <div class="field">
+        <label>DP Score (1-7)</label>
+        <div>${[1,2,3,4,5,6,7].map(n=>`<span class="chip ${feedback.scores.dp===n?'selected':''}" data-wa-score="dp" data-wa-value="${n}">${n}</span>`).join('')}</div>
+      </div>`);
+  }
+  if(assessment.methods.includes('myp_scale')){
+    scoreSectionsHtml.push(`
+      <div class="field">
+        <label>MYP Score (1-8)</label>
+        <div>${[1,2,3,4,5,6,7,8].map(n=>`<span class="chip ${feedback.scores.myp===n?'selected':''}" data-wa-score="myp" data-wa-value="${n}">${n}</span>`).join('')}</div>
+      </div>`);
+  }
+  if(assessment.methods.includes('be_ae_me_ee')){
+    scoreSectionsHtml.push(`
+      <div class="field">
+        <label>Level</label>
+        <div>${['BE','AE','ME','EE'].map(l=>`<span class="chip ${feedback.scores.level===l?'selected':''}" data-wa-score="level" data-wa-value="${l}">${l}</span>`).join('')}</div>
+      </div>`);
+  }
+
+  return `
+    ${backBtn}
+    <h3 style="margin-top:10px;">${escapeHtml(student.name)}</h3>
+    <div class="muted" style="margin-bottom:14px;">${escapeHtml(assessment.title)} &middot; Due ${formatDateNice(assessment.dueDate)}</div>
+    ${assessment.prompt ? `<div class="card"><em>${escapeHtml(assessment.prompt)}</em></div>` : ''}
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:14px;">
+      <div>
+        <h4 style="color:var(--bad);">Areas for Improvement</h4>
+        ${negSkills.map(s=>skillButtonHtml(s,'negative')).join('')}
+      </div>
+      <div>
+        <h4 style="color:var(--good);">Writing Successes</h4>
+        ${posSkills.map(s=>skillButtonHtml(s,'positive')).join('')}
+      </div>
+    </div>
+    <div class="field" style="margin-top:16px;">
+      <label>Comments (optional)</label>
+      <textarea id="wa-comment-input" placeholder="Summarize the issues or highlights...">${escapeHtml(feedback.comment||'')}</textarea>
+    </div>
+    ${scoreSectionsHtml.join('')}
+    <button class="btn primary block" id="wa-review-btn" style="margin-top:10px;">Review</button>
+  `;
+}
+
+/* ============ WRITING ASSESSMENT: wizard ============ */
+async function openWritingAssessmentWizard(){
+  const draft = {
+    title:'', type:'formative', mode:'in_class_timed', dueDate: todayStr(),
+    writingType: WRITING_TYPES[0], writingTypeOther:'', methods:[], prompt:'', promptNA:false
+  };
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'wa-wizard-backdrop';
+
+  function syncFormValues(){
+    const titleEl = backdrop.querySelector('#wa-title'); if(titleEl) draft.title = titleEl.value;
+    const dueEl = backdrop.querySelector('#wa-due-date'); if(dueEl) draft.dueDate = dueEl.value;
+    const otherEl = backdrop.querySelector('#wa-writing-type-other'); if(otherEl) draft.writingTypeOther = otherEl.value;
+    const promptEl = backdrop.querySelector('#wa-prompt'); if(promptEl && !draft.promptNA) draft.prompt = promptEl.value;
+  }
+
+  function renderForm(){
+    backdrop.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Add Writing Assessment</h3>
+          <button class="icon-btn" id="close-wa-wizard">&times;</button>
+        </div>
+        <div class="field">
+          <label>Title</label>
+          <input type="text" id="wa-title" placeholder="e.g. Unseen Poetry Analysis" value="${escapeHtml(draft.title)}">
+        </div>
+        <div class="field">
+          <label>Type</label>
+          <div>
+            <span class="chip ${draft.type==='formative'?'selected':''}" data-wa-field="type" data-wa-val="formative">Formative</span>
+            <span class="chip ${draft.type==='summative'?'selected':''}" data-wa-field="type" data-wa-val="summative">Summative</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Format</label>
+          <div>
+            <span class="chip ${draft.mode==='in_class_timed'?'selected':''}" data-wa-field="mode" data-wa-val="in_class_timed">In-Class Timed</span>
+            <span class="chip ${draft.mode==='take_home'?'selected':''}" data-wa-field="mode" data-wa-val="take_home">Take Home</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Due Date</label>
+          <input type="date" id="wa-due-date" value="${draft.dueDate}">
+        </div>
+        <div class="field">
+          <label>Writing Type</label>
+          <div>${WRITING_TYPES.map(t=>`<span class="chip ${draft.writingType===t?'selected':''}" data-wa-field="writingType" data-wa-val="${escapeHtml(t)}">${escapeHtml(t)}</span>`).join('')}</div>
+          ${draft.writingType==='Other' ? `<input type="text" id="wa-writing-type-other" placeholder="Describe the writing type" value="${escapeHtml(draft.writingTypeOther)}" style="margin-top:8px;">` : ''}
+        </div>
+        <div class="field">
+          <label>How will it be assessed? (select all that apply)</label>
+          <div>${WRITING_ASSESSMENT_METHODS.map(m=>`<span class="chip ${draft.methods.includes(m.key)?'selected':''}" data-wa-method="${m.key}">${escapeHtml(m.label)}</span>`).join('')}</div>
+        </div>
+        <div class="field">
+          <label>Essay Prompt / Question</label>
+          <textarea id="wa-prompt" placeholder="Paste or type the prompt..." ${draft.promptNA?'disabled':''}>${draft.promptNA ? '' : escapeHtml(draft.prompt)}</textarea>
+          <div style="margin-top:6px;"><span class="chip ${draft.promptNA?'selected':''}" id="wa-prompt-na">Not Applicable</span></div>
+        </div>
+        <button class="btn primary block" id="wa-to-preview-btn">Preview</button>
+      </div>
+    `;
+    backdrop.querySelector('#close-wa-wizard').addEventListener('click', ()=>backdrop.remove());
+    backdrop.querySelectorAll('[data-wa-field]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        syncFormValues();
+        draft[el.getAttribute('data-wa-field')] = el.getAttribute('data-wa-val');
+        renderForm();
+      });
+    });
+    backdrop.querySelectorAll('[data-wa-method]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        syncFormValues();
+        const key = el.getAttribute('data-wa-method');
+        const idx = draft.methods.indexOf(key);
+        if(idx===-1) draft.methods.push(key); else draft.methods.splice(idx,1);
+        renderForm();
+      });
+    });
+    const naChip = backdrop.querySelector('#wa-prompt-na');
+    if(naChip) naChip.addEventListener('click', ()=>{
+      syncFormValues();
+      draft.promptNA = !draft.promptNA;
+      renderForm();
+    });
+    backdrop.querySelector('#wa-to-preview-btn').addEventListener('click', ()=>{
+      syncFormValues();
+      if(!draft.title.trim()){ toast('Please enter a title'); return; }
+      if(draft.writingType==='Other' && !draft.writingTypeOther.trim()){ toast('Please describe the writing type'); return; }
+      renderPreview();
+    });
+  }
+
+  function renderPreview(){
+    const finalWritingType = draft.writingType==='Other' ? draft.writingTypeOther.trim() : draft.writingType;
+    const methodsLabel = draft.methods.length
+      ? draft.methods.map(k=> (WRITING_ASSESSMENT_METHODS.find(m=>m.key===k)||{}).label).join(', ')
+      : 'None selected';
+    backdrop.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Preview</h3>
+          <button class="icon-btn" id="close-wa-wizard2">&times;</button>
+        </div>
+        <div class="card">
+          <div><strong>${escapeHtml(draft.title)}</strong></div>
+          <div class="muted" style="margin-top:4px;">${draft.type==='summative'?'Summative':'Formative'} &middot; ${draft.mode==='in_class_timed'?'In-Class Timed':'Take Home'} &middot; Due ${formatDateNice(draft.dueDate)}</div>
+          <div style="margin-top:8px;"><strong>Writing Type:</strong> ${escapeHtml(finalWritingType)}</div>
+          <div style="margin-top:8px;"><strong>Assessed via:</strong> ${escapeHtml(methodsLabel)}</div>
+          <div style="margin-top:8px;"><strong>Prompt:</strong> ${draft.promptNA ? 'Not Applicable' : (draft.prompt.trim() ? escapeHtml(draft.prompt) : '<span class="muted">(none entered)</span>')}</div>
+        </div>
+        <div class="row" style="margin-top:14px;">
+          <button class="btn ghost" id="wa-back-to-form-btn">&larr; Edit</button>
+          <button class="btn primary" id="wa-confirm-btn">Confirm</button>
+        </div>
+      </div>
+    `;
+    backdrop.querySelector('#close-wa-wizard2').addEventListener('click', ()=>backdrop.remove());
+    backdrop.querySelector('#wa-back-to-form-btn').addEventListener('click', ()=> renderForm());
+    backdrop.querySelector('#wa-confirm-btn').addEventListener('click', async ()=>{
+      const assessment = {
+        id: uuid(), classId: state.currentClassId, title: draft.title.trim(),
+        type: draft.type, mode: draft.mode, dueDate: draft.dueDate,
+        writingType: finalWritingType, methods: draft.methods.slice(),
+        prompt: draft.promptNA ? null : (draft.prompt.trim() || null),
+        createdAt: Date.now()
+      };
+      await dbAdd('writingAssessments', assessment);
+      backdrop.remove();
+      state.writingSelectedAssessmentId = assessment.id;
+      state.writingView = 'detail';
+      toast('Assessment created', 'good');
+      render();
+    });
+  }
+
+  renderForm();
+  document.body.appendChild(backdrop);
+}
+
+/* ============ WRITING ASSESSMENT: manage entries modal ============ */
+async function openManageWritingEntriesModal(polarity, skillKey){
+  const events = (await dbGetAllByIndex('writingEvents','assessmentId', state.writingSelectedAssessmentId))
+    .filter(e=>e.studentId===state.writingSelectedStudentId && e.polarity===polarity && e.skillKey===skillKey)
+    .sort((a,b)=>a.timestamp-b.timestamp);
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'wa-manage-modal-backdrop';
+  const rowsHtml = events.map((e,i)=>`
+    <div class="row between" style="padding:8px 0; border-bottom:1px solid var(--line);">
+      <span>${i+1}. ${e.quote ? `&ldquo;${escapeHtml(e.quote)}&rdquo;` : '<span class="muted">(no excerpt)</span>'}</span>
+      <button class="btn small danger" data-remove-entry="${e.id}">Remove</button>
+    </div>`).join('');
+  backdrop.innerHTML = `
+    <div class="modal">
+      <div class="modal-header">
+        <h3>${escapeHtml(writingSkillLabel(polarity, skillKey))}</h3>
+        <button class="icon-btn" id="close-wa-manage-modal">&times;</button>
+      </div>
+      ${rowsHtml || '<div class="empty">No entries.</div>'}
+    </div>`;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#close-wa-manage-modal').addEventListener('click', ()=>{ backdrop.remove(); });
+  backdrop.querySelectorAll('[data-remove-entry]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      await dbDelete('writingEvents', btn.getAttribute('data-remove-entry'));
+      backdrop.remove();
+      render();
+    });
+  });
+}
+
+/* ============ WRITING ASSESSMENT: print / PDF export ============ */
+function getPrintArea(){
+  let el = document.getElementById('print-area');
+  if(!el){ el = document.createElement('div'); el.id = 'print-area'; document.body.appendChild(el); }
+  return el;
+}
+async function exportSingleWritingReport(assessmentId, studentId){
+  const assessment = await dbGet('writingAssessments', assessmentId);
+  const student = await dbGet('students', studentId);
+  const feedback = await getOrCreateWritingFeedbackRecord(assessmentId, state.currentClassId, studentId);
+  const tally = await computeWritingTally(assessmentId, studentId);
+  getPrintArea().innerHTML = `<div class="wa-print-page">${writingReportContentHtml(assessment, student, feedback, tally)}</div>`;
+  window.print();
+}
+async function exportAllWritingReports(assessmentId){
+  const assessment = await dbGet('writingAssessments', assessmentId);
+  const students = (await dbGetAllByIndex('students','classId', state.currentClassId))
+    .filter(s=>s.active!==false).sort((a,b)=>a.name.localeCompare(b.name));
+  const parts = [];
+  for(const s of students){
+    const feedback = await getWritingFeedbackRecord(assessmentId, s.id);
+    if(!feedback || !feedback.submittedAt) continue;
+    const tally = await computeWritingTally(assessmentId, s.id);
+    parts.push(`<div class="wa-print-page">${writingReportContentHtml(assessment, s, feedback, tally)}</div>`);
+  }
+  if(parts.length===0){ toast('No submitted reports yet to export'); return; }
+  getPrintArea().innerHTML = parts.join('');
+  window.print();
+}
+
+/* ============ WRITING ASSESSMENT: event wiring ============ */
+function wireWritingTabEvents(){
+  const addBtn = document.getElementById('add-writing-assessment-btn');
+  if(addBtn) addBtn.addEventListener('click', ()=> openWritingAssessmentWizard());
+
+  document.querySelectorAll('[data-open-assessment]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      state.writingSelectedAssessmentId = el.getAttribute('data-open-assessment');
+      state.writingView = 'detail';
+      render();
+    });
+  });
+
+  const backToListBtn = document.getElementById('back-to-writing-list');
+  if(backToListBtn) backToListBtn.addEventListener('click', ()=>{
+    state.writingView = 'list';
+    state.writingSelectedAssessmentId = null;
+    render();
+  });
+
+  const exportAllBtn = document.getElementById('export-all-writing-btn');
+  if(exportAllBtn) exportAllBtn.addEventListener('click', ()=> exportAllWritingReports(state.writingSelectedAssessmentId));
+
+  document.querySelectorAll('[data-open-student]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      state.writingSelectedStudentId = el.getAttribute('data-open-student');
+      state.writingView = 'student';
+      state.writingStudentMode = null;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-view-report]').forEach(el=>{
+    el.addEventListener('click', (ev)=>{
+      ev.stopPropagation();
+      state.writingSelectedStudentId = el.getAttribute('data-view-report');
+      state.writingView = 'student';
+      state.writingStudentMode = 'report';
+      render();
+    });
+  });
+
+  const backToDetailBtn = document.getElementById('back-to-writing-detail');
+  if(backToDetailBtn) backToDetailBtn.addEventListener('click', ()=>{
+    state.writingView = 'detail';
+    state.writingSelectedStudentId = null;
+    state.writingStudentMode = null;
+    render();
+  });
+
+  document.querySelectorAll('[data-wa-skill]').forEach(el=>{
+    el.addEventListener('click', async (ev)=>{
+      if(ev.target.closest('[data-wa-manage]')) return;
+      const skillKey = el.getAttribute('data-wa-skill');
+      const polarity = el.getAttribute('data-wa-polarity');
+      const quote = window.prompt('Quote the specific word, phrase, or sentence (optional) — Cancel to skip:');
+      await dbAdd('writingEvents', {
+        id: uuid(), assessmentId: state.writingSelectedAssessmentId, classId: state.currentClassId,
+        studentId: state.writingSelectedStudentId, polarity, skillKey,
+        quote: (quote && quote.trim()) ? quote.trim() : null, timestamp: Date.now()
+      });
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-wa-manage]').forEach(el=>{
+    el.addEventListener('click', (ev)=>{
+      ev.stopPropagation();
+      openManageWritingEntriesModal(el.getAttribute('data-wa-manage-polarity'), el.getAttribute('data-wa-manage'));
+    });
+  });
+
+  document.querySelectorAll('[data-wa-score]').forEach(el=>{
+    el.addEventListener('click', async ()=>{
+      const field = el.getAttribute('data-wa-score');
+      let value = el.getAttribute('data-wa-value');
+      if(field==='dp' || field==='myp') value = parseInt(value,10);
+      const feedback = await getOrCreateWritingFeedbackRecord(state.writingSelectedAssessmentId, state.currentClassId, state.writingSelectedStudentId);
+      feedback.scores[field] = (feedback.scores[field] === value) ? null : value;
+      feedback.updatedAt = Date.now();
+      await dbPut('writingFeedback', feedback);
+      render();
+    });
+  });
+
+  const commentInput = document.getElementById('wa-comment-input');
+  if(commentInput){
+    commentInput.addEventListener('input', async ()=>{
+      const feedback = await getOrCreateWritingFeedbackRecord(state.writingSelectedAssessmentId, state.currentClassId, state.writingSelectedStudentId);
+      feedback.comment = commentInput.value;
+      feedback.updatedAt = Date.now();
+      await dbPut('writingFeedback', feedback);
+    });
+  }
+
+  const reviewBtn = document.getElementById('wa-review-btn');
+  if(reviewBtn) reviewBtn.addEventListener('click', ()=>{
+    state.writingStudentMode = 'review';
+    render();
+  });
+
+  const backToEditBtn = document.getElementById('wa-back-to-edit-btn');
+  if(backToEditBtn) backToEditBtn.addEventListener('click', ()=>{
+    state.writingStudentMode = 'edit';
+    render();
+  });
+
+  const submitFeedbackBtn = document.getElementById('wa-submit-feedback-btn');
+  if(submitFeedbackBtn) submitFeedbackBtn.addEventListener('click', async ()=>{
+    const feedback = await getOrCreateWritingFeedbackRecord(state.writingSelectedAssessmentId, state.currentClassId, state.writingSelectedStudentId);
+    const firstTime = !feedback.submittedAt;
+    if(!feedback.submittedAt) feedback.submittedAt = Date.now();
+    feedback.updatedAt = Date.now();
+    await dbPut('writingFeedback', feedback);
+    toast(firstTime ? 'Feedback submitted' : 'Changes saved', 'good');
+    if(firstTime){
+      state.writingStudentMode = null;
+      state.writingView = 'detail';
+      state.writingSelectedStudentId = null;
+    } else {
+      state.writingStudentMode = 'report';
+    }
+    render();
+  });
+
+  const editFeedbackBtn = document.getElementById('wa-edit-feedback-btn');
+  if(editFeedbackBtn) editFeedbackBtn.addEventListener('click', ()=>{
+    state.writingStudentMode = 'edit';
+    render();
+  });
+
+  const exportReportBtn = document.getElementById('wa-export-report-btn');
+  if(exportReportBtn) exportReportBtn.addEventListener('click', ()=> exportSingleWritingReport(state.writingSelectedAssessmentId, state.writingSelectedStudentId));
 }
 
 /* ============ EXCEL EXPORT ============ */
