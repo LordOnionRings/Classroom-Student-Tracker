@@ -204,11 +204,17 @@ function interleaveByKey(students, keyFn){
     buckets[k].push(s);
   });
   order.forEach(k=> buckets[k] = shuffleArray(buckets[k]));
+  // Shuffle the order buckets are VISITED in too, not just their contents. Without this,
+  // regenerating groups for a class split across many small buckets (e.g. 2 genders x 4
+  // houses in a mid-size class) can come out looking identical every time -- most buckets
+  // only have 1 student, so there's nothing to shuffle inside them, and the visiting order
+  // was the only other source of variation.
+  const visitOrder = shuffleArray(order);
   const result = [];
   let remaining = true;
   while(remaining){
     remaining = false;
-    for(const k of order){
+    for(const k of visitOrder){
       if(buckets[k].length){ result.push(buckets[k].shift()); remaining = true; }
     }
   }
@@ -259,7 +265,7 @@ function buildBreakoutGroups(students, groupSize, genderMode, houseMode){
   }
 
   const allGroups = [];
-  Object.keys(buckets).sort().forEach(key=>{
+  shuffleArray(Object.keys(buckets)).forEach(key=>{
     let list = buckets[key];
     list = mixedDims.length
       ? interleaveByKey(list, s=> mixedDims.map(d=>attrFn[d](s)).join('|'))
@@ -285,48 +291,58 @@ const WRITING_ASSESSMENT_METHODS = [
 // Core 10 apply to every assessment; the DP-level 5 only show up when the assessment's
 // methods include the DP Grading Scale (higher-level analytical skills aren't relevant
 // to earlier MYP writing).
+// Descriptions are starter drafts (plain-language, student-facing) so the two-column list
+// isn't just jargon -- Mike may replace these later via an Excel import of his own department's
+// wording, same pattern as the student directory import.
 const WRITING_SKILLS_NEGATIVE = [
-  { key:'missing_thesis', label:'Missing Thesis' },
-  { key:'unclear_thesis', label:'Unclear Thesis' },
-  { key:'poor_organization', label:'Poor Organization' },
-  { key:'weak_topic_sentences', label:'Weak Topic Sentences' },
-  { key:'inconsistent_verb_tense', label:'Inconsistent Verb Tense' },
-  { key:'weak_evidence', label:'Weak Evidence' },
-  { key:'missing_peel', label:'Missing PEEL Structure' },
-  { key:'poor_punctuation', label:'Poor Punctuation' },
-  { key:'inconsistent_word_choice', label:'Inconsistent Word Choice' },
-  { key:'weak_conclusion', label:'Weak Conclusion' },
-  { key:'ignores_counterarguments', label:'Ignores Counterarguments', dpOnly:true },
-  { key:'descriptive_not_analytical', label:'Descriptive Not Analytical', dpOnly:true },
-  { key:'weak_quote_integration', label:'Weak Quote Integration', dpOnly:true },
-  { key:'missing_key_context', label:'Missing Key Context', dpOnly:true },
-  { key:'irrelevant_context', label:'Irrelevant Context or Arguments', dpOnly:true }
+  { key:'missing_thesis', label:'Missing Thesis', description:'The essay does not state a clear central argument or claim.' },
+  { key:'unclear_thesis', label:'Unclear Thesis', description:'A thesis is present but is vague, unfocused, or hard to identify.' },
+  { key:'poor_organization', label:'Poor Organization', description:"Ideas aren't arranged in a logical, easy-to-follow order." },
+  { key:'weak_topic_sentences', label:'Weak Topic Sentences', description:"Paragraphs don't open with a clear signpost of what that paragraph will argue." },
+  { key:'inconsistent_verb_tense', label:'Inconsistent Verb Tense', description:'Verb tense shifts unintentionally within or between sentences.' },
+  { key:'weak_evidence', label:'Weak Evidence', description:'Claims are not well supported by specific, relevant evidence from the text.' },
+  { key:'missing_peel', label:'Missing PEEL Structure', description:'Paragraphs skip one or more parts of Point-Evidence-Explain-Link.' },
+  { key:'poor_punctuation', label:'Poor Punctuation', description:'Punctuation errors (commas, run-ons, fragments) interfere with clarity.' },
+  { key:'inconsistent_word_choice', label:'Inconsistent Word Choice', description:'Vocabulary or tone shifts inappropriately, or word choice is imprecise.' },
+  { key:'weak_conclusion', label:'Weak Conclusion', description:"The conclusion doesn't effectively wrap up or reinforce the argument." },
+  { key:'ignores_counterarguments', label:'Ignores Counterarguments', description:'The essay does not acknowledge or respond to opposing viewpoints.', dpOnly:true },
+  { key:'descriptive_not_analytical', label:'Descriptive Not Analytical', description:'The writing summarizes or describes rather than analyzing why or how it matters.', dpOnly:true },
+  { key:'weak_quote_integration', label:'Weak Quote Integration', description:'Quotes are dropped in without being introduced or explained.', dpOnly:true },
+  { key:'missing_key_context', label:'Missing Key Context', description:'Necessary background or contextual information is left out.', dpOnly:true },
+  { key:'irrelevant_context', label:'Irrelevant Context or Arguments', description:"Included context or arguments don't actually support the essay's point.", dpOnly:true }
 ];
 const WRITING_SKILLS_POSITIVE = [
-  { key:'clear_thesis', label:'Clear Thesis' },
-  { key:'strong_organization', label:'Strong Organization' },
-  { key:'strong_topic_sentences', label:'Strong Topic Sentences' },
-  { key:'consistent_verb_tense', label:'Consistent Verb Tense' },
-  { key:'strong_evidence', label:'Strong Evidence' },
-  { key:'uses_peel', label:'Uses PEEL Structure' },
-  { key:'strong_punctuation', label:'Strong Punctuation' },
-  { key:'precise_word_choice', label:'Precise Word Choice' },
-  { key:'strong_conclusion', label:'Strong Conclusion' },
-  { key:'focused_argument', label:'Focused Argument' },
-  { key:'engages_counterarguments', label:'Engages Counterarguments', dpOnly:true },
-  { key:'strong_analysis', label:'Strong Analysis', dpOnly:true },
-  { key:'strong_quote_integration', label:'Strong Quote Integration', dpOnly:true },
-  { key:'relevant_outside_context', label:'Includes Relevant Outside Context', dpOnly:true },
-  { key:'nuanced_reasoning', label:'Nuanced Reasoning', dpOnly:true }
+  { key:'clear_thesis', label:'Clear Thesis', description:'States a specific, well-defined central argument.' },
+  { key:'strong_organization', label:'Strong Organization', description:'Ideas are arranged in a logical order that is easy to follow.' },
+  { key:'strong_topic_sentences', label:'Strong Topic Sentences', description:'Each paragraph opens with a clear signpost of its argument.' },
+  { key:'consistent_verb_tense', label:'Consistent Verb Tense', description:'Verb tense stays consistent throughout.' },
+  { key:'strong_evidence', label:'Strong Evidence', description:'Claims are backed by specific, relevant evidence.' },
+  { key:'uses_peel', label:'Uses PEEL Structure', description:'Paragraphs follow Point-Evidence-Explain-Link clearly.' },
+  { key:'strong_punctuation', label:'Strong Punctuation', description:'Punctuation is accurate and supports clarity.' },
+  { key:'precise_word_choice', label:'Precise Word Choice', description:'Vocabulary is specific, accurate, and appropriate to the task.' },
+  { key:'strong_conclusion', label:'Strong Conclusion', description:'Effectively reinforces the argument and brings the essay to a close.' },
+  { key:'focused_argument', label:'Focused Argument', description:'Stays tightly on-topic without drifting from the central claim.' },
+  { key:'engages_counterarguments', label:'Engages Counterarguments', description:'Acknowledges and responds to opposing viewpoints.', dpOnly:true },
+  { key:'strong_analysis', label:'Strong Analysis', description:'Goes beyond description to explain significance and meaning.', dpOnly:true },
+  { key:'strong_quote_integration', label:'Strong Quote Integration', description:'Quotes are introduced, embedded, and explained smoothly.', dpOnly:true },
+  { key:'relevant_outside_context', label:'Includes Relevant Outside Context', description:'Brings in background or context that directly supports the argument.', dpOnly:true },
+  { key:'nuanced_reasoning', label:'Nuanced Reasoning', description:'Considers complexity and multiple angles rather than oversimplifying.', dpOnly:true }
 ];
 function writingSkillsForAssessment(assessment, list){
   const includeDp = assessment && assessment.methods && assessment.methods.includes('dp_scale');
   return list.filter(s=> !s.dpOnly || includeDp);
 }
-function writingSkillLabel(polarity, key){
+function writingSkillMeta(polarity, key){
   const list = polarity==='positive' ? WRITING_SKILLS_POSITIVE : WRITING_SKILLS_NEGATIVE;
-  const s = list.find(x=>x.key===key);
+  return list.find(x=>x.key===key) || null;
+}
+function writingSkillLabel(polarity, key){
+  const s = writingSkillMeta(polarity, key);
   return s ? s.label : key;
+}
+function writingSkillDescription(polarity, key){
+  const s = writingSkillMeta(polarity, key);
+  return s ? s.description : '';
 }
 
 /* ---- Auto-compute current grade level from a cohort's graduating year ---- */
@@ -629,11 +645,27 @@ const state = {
   lastPickedAt:null,         // timestamp of that pick, used to auto-tag their next answer as "called on"
   reportWeekOffset:0,        // 0 = this week, -1 = last week, etc. (Weekly Report tab)
   groupCarryoverDismissed:false, // suppresses the "continue in groups?" banner once dismissed this app session
-  writingView:'list',        // list | detail | student
+  writingView:'list',        // list | detail | student | data
   writingSelectedAssessmentId:null,
   writingSelectedStudentId:null,
   writingStudentMode:null    // null (auto: report if submitted else edit) | edit | review | report
 };
+
+// All per-class UI navigation state (which tab, which assessment/student is drilled into,
+// dismissed banners, etc.) must be reset whenever we switch to a (possibly different) class --
+// otherwise a leftover selection from the PREVIOUS class leaks into whichever class is opened
+// next, since IDs are looked up directly without checking they belong to the current class.
+function resetPerClassUiState(){
+  state.activeTab = 'log';
+  state.dataSelectedStudentId = null;
+  state.dataView = 'student';
+  state.reportWeekOffset = 0;
+  state.groupCarryoverDismissed = false;
+  state.writingView = 'list';
+  state.writingSelectedAssessmentId = null;
+  state.writingSelectedStudentId = null;
+  state.writingStudentMode = null;
+}
 const CALLED_ON_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 
 /* ============ SESSION LOGIC ============ */
@@ -754,14 +786,15 @@ function wireClassList(){
     const cls = { id:uuid(), name, createdAt:Date.now() };
     await dbAdd('classes', cls);
     state.currentClassId = cls.id;
+    resetPerClassUiState();
     state.view = 'roster';
     render();
   });
   document.querySelectorAll('[data-open-class]').forEach(el=>{
     el.addEventListener('click', ()=>{
       state.currentClassId = el.getAttribute('data-open-class');
+      resetPerClassUiState();
       state.view = 'classHome';
-      state.activeTab = 'log';
       render();
     });
   });
@@ -847,6 +880,30 @@ async function importDirectoryFile(file){
   return { totalStudents, cohortCount, unrecognizedHouses };
 }
 
+// Backfills House / Gender / Homeroom Group / Homeroom Teacher on existing roster students
+// from the directory, for anyone added via "Add from Directory" (has a directoryId).
+// Deliberately fills gaps only -- a field the teacher already set (by hand or from a prior
+// import) is left alone, so this can't silently overwrite a manual correction. This matters
+// because "Add from Directory" copies house/gender/etc. as a one-time snapshot when the
+// student is added -- if the directory file is corrected or filled in LATER, students already
+// on a roster don't pick that up automatically. This is the catch-up step for that case.
+async function refreshRosterFromDirectory(classId){
+  const students = await dbGetAllByIndex('students','classId', classId);
+  let updated = 0;
+  for(const s of students){
+    if(!s.directoryId) continue;
+    const rec = await dbGet('directory', s.directoryId);
+    if(!rec) continue;
+    let changed = false;
+    if(!s.house && rec.house){ s.house = rec.house; changed = true; }
+    if(!s.gender && rec.gender){ s.gender = rec.gender; changed = true; }
+    if(!s.homeroomGroup && rec.homeroomGroup){ s.homeroomGroup = rec.homeroomGroup; changed = true; }
+    if(!s.homeroomTeacher && rec.homeroomTeacher){ s.homeroomTeacher = rec.homeroomTeacher; changed = true; }
+    if(changed){ await dbPut('students', s); updated++; }
+  }
+  return updated;
+}
+
 /* ============ VIEW: ROSTER EDITOR ============ */
 async function renderRoster(){
   const cls = await dbGet('classes', state.currentClassId);
@@ -906,6 +963,10 @@ async function renderRoster(){
         <input type="text" id="new-student-name" placeholder="Student name" style="max-width:260px;">
         <button class="btn primary" id="add-student-btn">Add Manually</button>
         <button class="btn" id="add-from-directory-btn">Add from Directory</button>
+        <button class="btn" id="refresh-from-directory-btn">Refresh from Directory</button>
+      </div>
+      <div class="muted" style="font-size:12px; margin-top:8px;">
+        "Refresh" fills in House / Gender / Homeroom Group / Homeroom Teacher for anyone added from the directory whose info is still blank here (e.g. if the directory file was corrected after they were added) &mdash; it won't overwrite anything you've already set by hand.
       </div>
     </div>
     ${rowsHtml || '<div class="empty">No students yet.</div>'}
@@ -930,6 +991,11 @@ function wireRoster(){
     render();
   });
   document.getElementById('add-from-directory-btn').addEventListener('click', openAddFromDirectoryModal);
+  document.getElementById('refresh-from-directory-btn').addEventListener('click', async ()=>{
+    const updated = await refreshRosterFromDirectory(state.currentClassId);
+    toast(updated>0 ? `Filled in missing info for ${updated} student(s)` : 'Everyone already has house/gender/homeroom info filled in', 'good');
+    render();
+  });
   document.querySelectorAll('[data-toggle-student]').forEach(el=>{
     el.addEventListener('click', async ()=>{
       const id = el.getAttribute('data-toggle-student');
@@ -2096,6 +2162,17 @@ async function computeWritingTally(assessmentId, studentId){
   });
   return { neg, pos, events };
 }
+// Deleting an assessment removes it AND every writingEvents/writingFeedback record tied to
+// it -- nothing orphaned is left behind on a student's record. This is deliberate: it's the
+// same cascade-delete guarantee the app already gives for deleting a class, and it means a
+// test/throwaway assessment can be fully wiped without polluting a student's longer-term data.
+async function deleteWritingAssessmentCascade(assessmentId){
+  const events = await dbGetAllByIndex('writingEvents','assessmentId', assessmentId);
+  for(const e of events) await dbDelete('writingEvents', e.id);
+  const feedback = await dbGetAllByIndex('writingFeedback','assessmentId', assessmentId);
+  for(const f of feedback) await dbDelete('writingFeedback', f.id);
+  await dbDelete('writingAssessments', assessmentId);
+}
 async function computeWritingStatus(assessmentId, studentId){
   const rec = await getWritingFeedbackRecord(assessmentId, studentId);
   if(rec && rec.submittedAt) return 'submitted';
@@ -2183,7 +2260,9 @@ async function renderWritingAssessmentList(){
 
 async function renderWritingAssessmentDetail(assessmentId){
   const assessment = await dbGet('writingAssessments', assessmentId);
-  if(!assessment){
+  // Defensive check: an assessment ID left over from a different class (e.g. a stale
+  // selection) must never render here -- a writing assessment belongs to exactly one class.
+  if(!assessment || assessment.classId !== state.currentClassId){
     state.writingView = 'list'; state.writingSelectedAssessmentId = null;
     return await renderWritingAssessmentList();
   }
@@ -2211,9 +2290,12 @@ async function renderWritingAssessmentDetail(assessmentId){
   }
   const pct = students.length ? Math.round(100*submittedCount/students.length) : 0;
   return `
-    <div class="row between" style="margin-bottom:10px;">
+    <div class="row between wrap" style="margin-bottom:10px;">
       <button class="btn ghost" id="back-to-writing-list">&larr; All Assessments</button>
-      <button class="btn small" id="export-all-writing-btn">Export All Reports (PDF)</button>
+      <div class="row wrap">
+        <button class="btn small" id="export-all-writing-btn">Export All Reports (PDF)</button>
+        <button class="btn small danger" id="delete-writing-assessment-btn">Delete Assessment</button>
+      </div>
     </div>
     <h3>${escapeHtml(assessment.title)}</h3>
     <div class="muted" style="margin-bottom:14px;">
@@ -2226,7 +2308,10 @@ async function renderWritingAssessmentDetail(assessmentId){
 async function renderWritingStudentPage(assessmentId, studentId){
   const assessment = await dbGet('writingAssessments', assessmentId);
   const student = await dbGet('students', studentId);
-  if(!assessment || !student){
+  // Same defensive check as the detail page: both the assessment AND the student must
+  // actually belong to the class currently open, or we bounce back rather than render
+  // data that belongs to a different class.
+  if(!assessment || assessment.classId !== state.currentClassId || !student || student.classId !== state.currentClassId){
     state.writingView = 'detail'; state.writingSelectedStudentId = null;
     return await renderWritingAssessmentDetail(assessmentId);
   }
@@ -2255,12 +2340,15 @@ async function renderWritingStudentPage(assessmentId, studentId){
     const t = bucket[skill.key];
     const count = t ? t.count : 0;
     return `
-      <div class="cat-btn" style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;" data-wa-skill="${skill.key}" data-wa-polarity="${polarity}">
-        <span>${escapeHtml(skill.label)}</span>
-        <span class="row" style="gap:8px;">
-          ${count ? `<span class="event-badge" style="position:static;">${count}</span>` : ''}
-          ${count ? `<span class="btn ghost" style="padding:2px 8px; font-size:12px;" data-wa-manage="${skill.key}" data-wa-manage-polarity="${polarity}">Manage</span>` : ''}
-        </span>
+      <div class="cat-btn" style="cursor:pointer;" data-wa-skill="${skill.key}" data-wa-polarity="${polarity}">
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+          <span>${escapeHtml(skill.label)}</span>
+          <span class="row" style="gap:8px;">
+            ${count ? `<span class="event-badge" style="position:static;">${count}</span>` : ''}
+            ${count ? `<span class="btn ghost" style="padding:2px 8px; font-size:12px;" data-wa-manage="${skill.key}" data-wa-manage-polarity="${polarity}">Manage</span>` : ''}
+          </span>
+        </div>
+        ${skill.description ? `<div class="muted" style="font-style:italic; font-weight:400; margin-top:4px;">${escapeHtml(skill.description)}</div>` : ''}
       </div>`;
   };
 
@@ -2536,6 +2624,20 @@ function wireWritingTabEvents(){
 
   const exportAllBtn = document.getElementById('export-all-writing-btn');
   if(exportAllBtn) exportAllBtn.addEventListener('click', ()=> exportAllWritingReports(state.writingSelectedAssessmentId));
+
+  const deleteAssessmentBtn = document.getElementById('delete-writing-assessment-btn');
+  if(deleteAssessmentBtn) deleteAssessmentBtn.addEventListener('click', async ()=>{
+    const assessment = await dbGet('writingAssessments', state.writingSelectedAssessmentId);
+    const ok = window.confirm(
+      `Delete "${assessment ? assessment.title : 'this assessment'}" completely? This permanently erases every logged skill entry, quote, comment, and score for every student on it. This cannot be undone.`
+    );
+    if(!ok) return;
+    await deleteWritingAssessmentCascade(state.writingSelectedAssessmentId);
+    toast('Assessment deleted', 'good');
+    state.writingView = 'list';
+    state.writingSelectedAssessmentId = null;
+    render();
+  });
 
   document.querySelectorAll('[data-open-student]').forEach(el=>{
     el.addEventListener('click', ()=>{
