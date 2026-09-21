@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Classroom Tracker</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.2.0/chartjs-plugin-datalabels.min.js"></script>
 <style>
   :root{
     --bg:#f4f5f7; --panel:#ffffff; --ink:#1f2430; --muted:#6b7280; --line:#e3e5ea;
@@ -332,17 +334,147 @@ function writingSkillsForAssessment(assessment, list){
   const includeDp = assessment && assessment.methods && assessment.methods.includes('dp_scale');
   return list.filter(s=> !s.dpOnly || includeDp);
 }
-function writingSkillMeta(polarity, key){
+function writingSkillMeta(polarity, key, assessment){
+  // When the tap belongs to a Lit assessment, look the key up in that paper's feedback
+  // modules first -- Lit module keys (e.g. "signposting") are a different namespace than the
+  // general taxonomy keys, so assessment context is required to resolve them correctly.
+  if(assessment && isLitAssessment(assessment)){
+    const m = litModulesForPaper(assessment.subjectMeta.paper).find(x=>x.key===key);
+    if(m) return { key:m.key, label:m.label, description: polarity==='positive' ? m.positive : m.negative };
+  }
   const list = polarity==='positive' ? WRITING_SKILLS_POSITIVE : WRITING_SKILLS_NEGATIVE;
   return list.find(x=>x.key===key) || null;
 }
-function writingSkillLabel(polarity, key){
-  const s = writingSkillMeta(polarity, key);
+function writingSkillLabel(polarity, key, assessment){
+  const s = writingSkillMeta(polarity, key, assessment);
   return s ? s.label : key;
 }
-function writingSkillDescription(polarity, key){
-  const s = writingSkillMeta(polarity, key);
+function writingSkillDescription(polarity, key, assessment){
+  const s = writingSkillMeta(polarity, key, assessment);
   return s ? s.description : '';
+}
+
+/* ============ WRITING ASSESSMENT: subject / DP Lit criteria & strands ============ */
+// Fixed subject list for the beta. Only "Eng Lit DP" gets the full paper/criteria/strand
+// treatment below; every other subject just uses the general skill taxonomy above with no
+// criteria step, exactly as the app already behaves today. More subjects (with their own
+// criteria) get added to this same pattern once Mike has them organized.
+const SUBJECTS = [
+  'Language Acquisition MYP','Language and Literature MYP','Individuals and Societies MYP',
+  'Eng Lit DP','Eng Language DP','History DP','Geography DP'
+];
+
+// Strands are the guiding-question bullets under each IB criterion descriptor (confirmed with
+// Mike). A criterion with one bullet has one strand; Criterion A/D have two.
+const LIT_CRITERIA_PAPER1 = [
+  { code:'A', label:'Understanding and interpretation', strands:[
+    'How well does the candidate demonstrate an understanding of the text and draw reasoned conclusions from implications in it?',
+    'How well are ideas supported by references to the text?'
+  ]},
+  { code:'B', label:'Analysis and evaluation', strands:[
+    'To what extent does the candidate analyse and evaluate how textual features and/or authorial choices shape meaning?'
+  ]},
+  { code:'C', label:'Focus and organization', strands:[
+    'How well organized, coherent and focused is the presentation of ideas?'
+  ]},
+  { code:'D', label:'Language', strands:[
+    'How clear, varied and accurate is the language?',
+    'How appropriate is the choice of register and style?'
+  ]}
+];
+// B1/B2 are modeled as two independent criteria (each separately selectable, strand-able, and
+// taggable on a feedback tap) but share a groupLabel so the UI can still show them nested under
+// one "Criterion B" heading, per Mike's confirmed answer.
+const LIT_CRITERIA_PAPER2 = [
+  { code:'A', label:'Knowledge, understanding and interpretation', strands:[
+    'How much knowledge and understanding does the candidate demonstrate of the works in relation to the question?'
+  ]},
+  { code:'B1', label:'Analysis and evaluation of textual features', groupLabel:'Criterion B: Analysis and evaluation', strands:[
+    'To what extent does the candidate analyse and evaluate how meaning is shaped by the choices of language, technique and style, and/or broader authorial choices?'
+  ]},
+  { code:'B2', label:'Comparative analysis', groupLabel:'Criterion B: Analysis and evaluation', strands:[
+    'How effectively does the candidate analyse similarities and/or differences between the two works studied?'
+  ]},
+  { code:'C', label:'Focus and organization', strands:[
+    'How well structured, balanced and focused is the presentation of ideas?'
+  ]},
+  { code:'D', label:'Language', strands:[
+    'How clear, varied and accurate is the language?',
+    'How appropriate is the choice of register and style?'
+  ]}
+];
+
+// Feedback modules replace the general skill taxonomy for Eng Lit DP assessments. Each has a
+// single key with a distinct positive ("Good") and negative ("Point for Improvement") description,
+// sourced directly from the department's grading/analysis checkpoints document.
+const LIT_FEEDBACK_MODULES_PAPER1 = [
+  { key:'literal_understanding', label:'Literal Understanding', positive:'Literal understanding is clear and accurate.', negative:'There is a questionable reading or misreading of the text.' },
+  { key:'thesis', label:'Thesis', positive:'Thesis has a rich idea with wider implications.', negative:'Thesis is ambiguous or unrefined.' },
+  { key:'points', label:'Points', positive:'Points develop based on the rich idea.', negative:"Points make examiner think 'so what?'" },
+  { key:'signposting', label:'Signposting', positive:'Signposting is clear and accurate.', negative:'Signposting is unrefined or unclear.' },
+  { key:'quotations', label:'Quotations', positive:'Quotations are embedded well.', negative:'Quotations are poorly integrated.' },
+  { key:'analysis', label:'Analysis', positive:'Analysis focuses on author and craft.', negative:'Analysis is descriptive and/or focuses mostly on content and character.' },
+  { key:'evaluation', label:'Evaluation', positive:'Evaluation is insightful.', negative:'Evaluation does not progress insight.' },
+  { key:'readership', label:'Readership', positive:'Readership is evaluated.', negative:'There is no/minimal evaluation of readership.' },
+  { key:'terminology', label:'Terminology', positive:'Use of terminology is accurate.', negative:'Use of terminology is inaccurate or questionable.' },
+  { key:'focus', label:'Focus', positive:'Focus is maintained based on the thesis.', negative:'Focus slips away from the literary area and/or rich idea of the thesis.' }
+];
+const LIT_FEEDBACK_MODULES_PAPER2 = [
+  { key:'knowledge', label:'Knowledge', positive:'Knowledge of chosen texts is good and accurate.', negative:'Knowledge of chosen texts has inaccuracies.' },
+  { key:'synthesis', label:'Synthesis', positive:'Knowledge is synthesized to answer the chosen question.', negative:'Knowledge is poorly synthesized to answer the chosen question.' },
+  { key:'thesis', label:'Thesis', positive:'Thesis is comparative and has a rich idea with wider implications.', negative:'Thesis is not comparative and/or does not answer the question.' },
+  { key:'points', label:'Points', positive:'Points are comparative and develop based on the rich idea.', negative:"Points are not comparative and/or are 'so what?'" },
+  { key:'signposting', label:'Signposting', positive:'Signposting is clear and accurate.', negative:'Signposting is unrefined or unclear.' },
+  { key:'quotations', label:'Quotations', positive:'Quotations are embedded well.', negative:'Quotations are poorly integrated.' },
+  { key:'analysis', label:'Analysis', positive:'Analysis focuses on author and craft.', negative:'Analysis is descriptive and/or focuses mostly on content and character.' },
+  { key:'comparative_analysis', label:'Comparative Analysis', positive:'Analysis is scaffolded comparatively.', negative:'Analysis is superficially comparative.' },
+  { key:'evaluation', label:'Evaluation', positive:'Evaluation is insightful.', negative:'Evaluation does not progress insight.' },
+  { key:'readership', label:'Readership', positive:'Readership is evaluated.', negative:'There is no/minimal evaluation of readership.' },
+  { key:'terminology', label:'Terminology', positive:'Use of terminology is accurate.', negative:'Use of terminology is inaccurate or questionable.' },
+  { key:'focus', label:'Focus', positive:'Focus is maintained based on the thesis.', negative:'Focus slips away from the literary area and/or rich idea of the thesis.' },
+  { key:'grammar', label:'Grammar', positive:'Subject-verb-agreement is used correctly.', negative:'Subject-verb-agreement is inaccurate.' }
+];
+
+function isLitAssessment(assessment){
+  return !!(assessment && assessment.subject === 'Eng Lit DP' && assessment.subjectMeta && assessment.subjectMeta.paper);
+}
+function litCriteriaForPaper(paper){
+  return paper==='paper2' ? LIT_CRITERIA_PAPER2 : LIT_CRITERIA_PAPER1;
+}
+function litModulesForPaper(paper){
+  return paper==='paper2' ? LIT_FEEDBACK_MODULES_PAPER2 : LIT_FEEDBACK_MODULES_PAPER1;
+}
+// Confirmed with Mike: Paper 1 HL doubles each criterion's max (5->10, total 20->40) with the
+// same single response; Paper 2's total (25) doesn't change between SL/HL.
+function litCriterionMaxScore(paper, level){
+  return (paper==='paper1' && level==='HL') ? 10 : 5;
+}
+function writingNegSkillsForAssessment(assessment){
+  if(isLitAssessment(assessment)){
+    return litModulesForPaper(assessment.subjectMeta.paper).map(m=>({ key:m.key, label:m.label, description:m.negative }));
+  }
+  return writingSkillsForAssessment(assessment, WRITING_SKILLS_NEGATIVE);
+}
+function writingPosSkillsForAssessment(assessment){
+  if(isLitAssessment(assessment)){
+    return litModulesForPaper(assessment.subjectMeta.paper).map(m=>({ key:m.key, label:m.label, description:m.positive }));
+  }
+  return writingSkillsForAssessment(assessment, WRITING_SKILLS_POSITIVE);
+}
+// Sums whatever criterion scores have been entered so far. Returns both the running total and
+// the max-if-fully-scored, plus whether every selected criterion has a score yet (so the UI can
+// flag an incomplete grade rather than silently showing a partial number as final).
+function computeWritingCriteriaTotal(assessment, feedback){
+  if(!isLitAssessment(assessment)) return null;
+  const criteria = assessment.subjectMeta.criteria.filter(c=>c.selected);
+  const scores = (feedback && feedback.scores && feedback.scores.criteria) || {};
+  let total = 0, max = 0, complete = true;
+  criteria.forEach(c=>{
+    max += c.maxScore;
+    const v = scores[c.code];
+    if(v==null) complete = false; else total += v;
+  });
+  return { total, max, complete };
 }
 
 /* ---- Auto-compute current grade level from a cohort's graduating year ---- */
@@ -648,7 +780,10 @@ const state = {
   writingView:'list',        // list | detail | student | data
   writingSelectedAssessmentId:null,
   writingSelectedStudentId:null,
-  writingStudentMode:null    // null (auto: report if submitted else edit) | edit | review | report
+  writingStudentMode:null,   // null (auto: report if submitted else edit) | edit | review | report
+  writingDataView:'student', // student | class (sub-tab within the Data sub-view)
+  writingDataSelectedStudentId:null,
+  writingDataSelectedAssessmentId:null // when set, Data view is scoped to one assessment instead of all-time
 };
 
 // All per-class UI navigation state (which tab, which assessment/student is drilled into,
@@ -665,6 +800,9 @@ function resetPerClassUiState(){
   state.writingSelectedAssessmentId = null;
   state.writingSelectedStudentId = null;
   state.writingStudentMode = null;
+  state.writingDataView = 'student';
+  state.writingDataSelectedStudentId = null;
+  state.writingDataSelectedAssessmentId = null;
 }
 const CALLED_ON_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -2147,7 +2285,9 @@ async function getWritingFeedbackRecord(assessmentId, studentId){
 async function getOrCreateWritingFeedbackRecord(assessmentId, classId, studentId){
   let rec = await getWritingFeedbackRecord(assessmentId, studentId);
   if(rec) return rec;
-  rec = { id: uuid(), assessmentId, classId, studentId, comment:'', scores:{dp:null,myp:null,level:null}, submittedAt:null, updatedAt: Date.now() };
+  // scores.criteria holds Eng Lit DP per-criterion scores (code -> 0..maxScore), keyed
+  // independently of dp/myp/level so non-Lit assessments never touch it.
+  rec = { id: uuid(), assessmentId, classId, studentId, comment:'', scores:{dp:null,myp:null,level:null,criteria:{}}, submittedAt:null, updatedAt: Date.now() };
   await dbAdd('writingFeedback', rec);
   return rec;
 }
@@ -2178,13 +2318,103 @@ async function computeWritingStatus(assessmentId, studentId){
   if(rec && rec.submittedAt) return 'submitted';
   const events = (await dbGetAllByIndex('writingEvents','assessmentId', assessmentId)).filter(e=>e.studentId===studentId);
   const hasComment = rec && rec.comment && rec.comment.trim();
-  const hasScore = rec && rec.scores && Object.values(rec.scores).some(v=>v!=null);
+  // scores.dp/myp/level are checked directly (not via Object.values) because scores.criteria
+  // is always a truthy object ({} when nothing scored yet) and would otherwise register as
+  // "scored" the instant the feedback record is created.
+  const hasScore = !!(rec && rec.scores && (
+    rec.scores.dp!=null || rec.scores.myp!=null || rec.scores.level!=null ||
+    (rec.scores.criteria && Object.values(rec.scores.criteria).some(v=>v!=null))
+  ));
   if(events.length>0 || hasComment || hasScore) return 'in_progress';
   return 'unassessed';
 }
 
+/* ============ WRITING ASSESSMENT: data aggregation ============ */
+function rankWritingSkills(bySkill, polarity){
+  return Object.keys(bySkill)
+    .map(key=>({ key, label: writingSkillLabel(polarity, key), count: bySkill[key] }))
+    .sort((x,y)=> y.count - x.count || x.label.localeCompare(y.label));
+}
+
+// Aggregates one student's writing tags either across every assessment in the class
+// (assessmentId omitted) or scoped to a single assessment. Used for both the Student Data
+// overview and the per-assessment drill-down (same shape, different scope).
+async function computeStudentWritingAggregate(classId, studentId, assessmentId){
+  const allAssessments = (await dbGetAllByIndex('writingAssessments','classId', classId))
+    .sort((a,b)=> (a.dueDate||'').localeCompare(b.dueDate||'') || a.createdAt - b.createdAt);
+  const assessments = assessmentId ? allAssessments.filter(a=>a.id===assessmentId) : allAssessments;
+
+  const posBySkill = {}, negBySkill = {};
+  let posTotal = 0, negTotal = 0;
+  const trend = [];
+
+  for(const a of assessments){
+    const events = (await dbGetAllByIndex('writingEvents','assessmentId', a.id)).filter(e=>e.studentId===studentId);
+    let aPos = 0, aNeg = 0;
+    events.forEach(e=>{
+      if(e.polarity==='positive'){ posBySkill[e.skillKey]=(posBySkill[e.skillKey]||0)+1; posTotal++; aPos++; }
+      else { negBySkill[e.skillKey]=(negBySkill[e.skillKey]||0)+1; negTotal++; aNeg++; }
+    });
+    trend.push({ assessmentId:a.id, title:a.title, dueDate:a.dueDate, posCount:aPos, negCount:aNeg });
+  }
+
+  const positiveRanked = rankWritingSkills(posBySkill, 'positive');
+  const negativeRanked = rankWritingSkills(negBySkill, 'negative');
+  return {
+    posBySkill, negBySkill, posTotal, negTotal,
+    positiveRanked, negativeRanked,
+    topPositive: positiveRanked.slice(0,3),
+    topNegative: negativeRanked.slice(0,3),
+    trend
+  };
+}
+
+// Same idea, but for the whole class: per-skill totals, a per-assessment trend using the
+// class AVERAGE (since raw totals aren't comparable across assessments with different
+// participation), and one point per student (positive count x, negative count y) for the
+// outlier scatter plot -- scoped to all-time or a single assessment, same as the student version.
+async function computeClassWritingAggregate(classId, assessmentId){
+  const students = (await dbGetAllByIndex('students','classId', classId)).filter(s=>s.active!==false);
+  const allAssessments = (await dbGetAllByIndex('writingAssessments','classId', classId))
+    .sort((a,b)=> (a.dueDate||'').localeCompare(b.dueDate||'') || a.createdAt - b.createdAt);
+  const assessments = assessmentId ? allAssessments.filter(a=>a.id===assessmentId) : allAssessments;
+
+  const posBySkill = {}, negBySkill = {};
+  let posTotal = 0, negTotal = 0;
+  const trend = [];
+  const perStudentTotals = {};
+  students.forEach(s=> perStudentTotals[s.id] = { pos:0, neg:0 });
+
+  for(const a of assessments){
+    const events = await dbGetAllByIndex('writingEvents','assessmentId', a.id);
+    let aPos = 0, aNeg = 0;
+    events.forEach(e=>{
+      if(!perStudentTotals.hasOwnProperty(e.studentId)) return; // student no longer active/on roster
+      if(e.polarity==='positive'){ posBySkill[e.skillKey]=(posBySkill[e.skillKey]||0)+1; posTotal++; aPos++; perStudentTotals[e.studentId].pos++; }
+      else { negBySkill[e.skillKey]=(negBySkill[e.skillKey]||0)+1; negTotal++; aNeg++; perStudentTotals[e.studentId].neg++; }
+    });
+    const denom = students.length || 1;
+    trend.push({ assessmentId:a.id, title:a.title, dueDate:a.dueDate, avgPos: aPos/denom, avgNeg: aNeg/denom });
+  }
+
+  const positiveRanked = rankWritingSkills(posBySkill, 'positive');
+  const negativeRanked = rankWritingSkills(negBySkill, 'negative');
+  const scatterPoints = students
+    .map(s=>({ studentId:s.id, name:s.name, firstName: s.name.split(' ')[0], posCount: perStudentTotals[s.id].pos, negCount: perStudentTotals[s.id].neg }))
+    .filter(p=> p.posCount>0 || p.negCount>0);
+
+  return {
+    posBySkill, negBySkill, posTotal, negTotal,
+    positiveRanked, negativeRanked,
+    topPositive: positiveRanked.slice(0,3),
+    topNegative: negativeRanked.slice(0,3),
+    trend, scatterPoints
+  };
+}
+
 /* ============ WRITING ASSESSMENT: rendering ============ */
 function writingReportContentHtml(assessment, student, feedback, tally){
+  if(isLitAssessment(assessment)) return writingLitReportContentHtml(assessment, student, feedback, tally);
   const renderBucket = (bucket, polarity) => {
     const keys = Object.keys(bucket);
     if(keys.length===0) return '<div class="muted">None logged.</div>';
@@ -2193,7 +2423,7 @@ function writingReportContentHtml(assessment, student, feedback, tally){
       const quotesHtml = t.quotes.length
         ? `<ul style="margin:4px 0 0 18px;">${t.quotes.map(q=>`<li>&ldquo;${escapeHtml(q)}&rdquo;</li>`).join('')}</ul>`
         : '';
-      return `<div style="margin-bottom:8px;"><strong>${escapeHtml(writingSkillLabel(polarity, key))}</strong> <span class="muted">&times;${t.count}</span>${quotesHtml}</div>`;
+      return `<div style="margin-bottom:8px;"><strong>${escapeHtml(writingSkillLabel(polarity, key, assessment))}</strong> <span class="muted">&times;${t.count}</span>${quotesHtml}</div>`;
     }).join('');
   };
   const scoreLines = [];
@@ -2221,7 +2451,71 @@ function writingReportContentHtml(assessment, student, feedback, tally){
   `;
 }
 
+// Eng Lit DP report: one block per selected Criterion showing its score and the specific
+// feedback taps (module + quote) tagged to that Criterion, split Strengths/Points for
+// Improvement -- this is the auto-attribution Mike called "really key to making the project
+// worth it": it shows the student WHY they got e.g. 2/5 instead of 3/5 on a given Criterion.
+// Any tap that wasn't tagged to a Criterion still appears, in an "Untagged Feedback" section,
+// so nothing logged is ever silently dropped from the report.
+function writingLitReportContentHtml(assessment, student, feedback, tally){
+  const criteria = assessment.subjectMeta.criteria;
+  const total = computeWritingCriteriaTotal(assessment, feedback);
+  const taggedEventIds = new Set();
+
+  const tapLineHtml = (e) => {
+    const label = writingSkillLabel(e.polarity, e.skillKey, assessment);
+    const quote = e.quote ? ` &mdash; &ldquo;${escapeHtml(e.quote)}&rdquo;` : '';
+    return `<li><strong>${escapeHtml(label)}</strong>${quote}</li>`;
+  };
+
+  const criteriaBlocksHtml = criteria.map(c=>{
+    const posTaps = tally.events.filter(e=>e.polarity==='positive' && e.criteriaCodes && e.criteriaCodes.includes(c.code));
+    const negTaps = tally.events.filter(e=>e.polarity==='negative' && e.criteriaCodes && e.criteriaCodes.includes(c.code));
+    posTaps.forEach(e=>taggedEventIds.add(e.id));
+    negTaps.forEach(e=>taggedEventIds.add(e.id));
+    const score = feedback.scores && feedback.scores.criteria ? feedback.scores.criteria[c.code] : null;
+    const strandsHtml = c.strands && c.strands.length
+      ? `<div class="muted" style="font-style:italic; margin-top:4px;">${c.strands.map(s=>escapeHtml(s.taskDescription ? `${s.text} -- ${s.taskDescription}` : s.text)).join('<br>')}</div>`
+      : '';
+    return `
+      <div class="card" style="margin-bottom:10px;">
+        <div class="row between"><strong>${escapeHtml(c.code)}: ${escapeHtml(c.label)}</strong><span>${score!=null ? `${score} / ${c.maxScore}` : `-- / ${c.maxScore}`}</span></div>
+        ${strandsHtml}
+        <div style="margin-top:8px;"><strong style="color:var(--good);">Strengths</strong>${posTaps.length ? `<ul style="margin:4px 0 0 18px;">${posTaps.map(tapLineHtml).join('')}</ul>` : '<div class="muted">None logged.</div>'}</div>
+        <div style="margin-top:8px;"><strong style="color:var(--bad);">Points for Improvement</strong>${negTaps.length ? `<ul style="margin:4px 0 0 18px;">${negTaps.map(tapLineHtml).join('')}</ul>` : '<div class="muted">None logged.</div>'}</div>
+      </div>`;
+  }).join('');
+
+  const untaggedEvents = tally.events.filter(e=> !taggedEventIds.has(e.id));
+  const untaggedHtml = untaggedEvents.length
+    ? `<div class="card" style="margin-top:10px;"><strong>Untagged Feedback</strong><ul style="margin:6px 0 0 18px;">${untaggedEvents.map(tapLineHtml).join('')}</ul></div>`
+    : '';
+
+  return `
+    <h3>${escapeHtml(assessment.title)}</h3>
+    <div class="muted" style="margin-bottom:4px;">${escapeHtml(student.name)} &middot; Due ${formatDateNice(assessment.dueDate)}</div>
+    <div class="muted" style="margin-bottom:10px;">Eng Lit DP &middot; ${assessment.subjectMeta.paper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(assessment.subjectMeta.level||'')}</div>
+    ${assessment.prompt ? `<div class="card" style="margin-bottom:14px;"><em>${escapeHtml(assessment.prompt)}</em></div>` : ''}
+    <div style="margin-bottom:10px;"><strong>Total: ${total.total} / ${total.max}</strong>${total.complete?'':' <span class="muted">(not all criteria scored yet)</span>'}</div>
+    ${criteriaBlocksHtml}
+    ${untaggedHtml}
+    ${feedback.comment ? `<h4 style="margin-top:16px;">Comments</h4><p>${escapeHtml(feedback.comment)}</p>` : ''}
+  `;
+}
+
+function writingSubNavHtml(){
+  return `<div class="row" style="margin-bottom:14px;">
+    <button class="btn small ${state.writingView!=='data'?'primary':''}" data-writing-subnav="assessments">Assessments</button>
+    <button class="btn small ${state.writingView==='data'?'primary':''}" data-writing-subnav="data">Data</button>
+  </div>`;
+}
+
 async function renderWritingTab(){
+  // NOTE: Data page (Stage 2) sub-nav is intentionally not wired into the UI yet.
+  // The aggregation + rendering functions below (renderWritingDataView, etc.) are
+  // built and ready, but paused per instruction while the subject/criteria/strand
+  // architecture (Eng Lit DP) is designed and built first. Re-enable by restoring
+  // the writingSubNavHtml() prefix + 'data' branch once that work resumes.
   if(state.writingView==='detail' && state.writingSelectedAssessmentId){
     return await renderWritingAssessmentDetail(state.writingSelectedAssessmentId);
   }
@@ -2229,6 +2523,131 @@ async function renderWritingTab(){
     return await renderWritingStudentPage(state.writingSelectedAssessmentId, state.writingSelectedStudentId);
   }
   return await renderWritingAssessmentList();
+}
+
+function writingAggregateSummaryHtml(agg, scopeLabel){
+  const posHtml = agg.topPositive.length
+    ? agg.topPositive.map((x,i)=>`<div style="margin-bottom:4px;">${i+1}. ${escapeHtml(x.label)} <span class="muted">&times;${x.count}</span></div>`).join('')
+    : `<div class="muted">No data yet.</div>`;
+  const negHtml = agg.topNegative.length
+    ? agg.topNegative.map((x,i)=>`<div style="margin-bottom:4px;">${i+1}. ${escapeHtml(x.label)} <span class="muted">&times;${x.count}</span></div>`).join('')
+    : `<div class="muted">No data yet.</div>`;
+  return `
+    <div class="grid-cards">
+      <div class="card">
+        <div class="row between"><strong>Top 3 Writing Successes</strong><span class="tag positive">${escapeHtml(scopeLabel)}</span></div>
+        <div style="margin-top:8px;">${posHtml}</div>
+      </div>
+      <div class="card">
+        <div class="row between"><strong>Bottom 3 Writing Challenges</strong><span class="tag negative">${escapeHtml(scopeLabel)}</span></div>
+        <div style="margin-top:8px;">${negHtml}</div>
+      </div>
+    </div>`;
+}
+
+async function renderWritingDataView(){
+  const subTabs = `
+    <div class="row" style="margin-bottom:14px;">
+      <button class="btn small ${state.writingDataView==='student'?'primary':''}" data-writing-dataview="student">Student Data</button>
+      <button class="btn small ${state.writingDataView==='class'?'primary':''}" data-writing-dataview="class">Class Data</button>
+    </div>`;
+  const body = state.writingDataView==='class'
+    ? await renderWritingClassData()
+    : await renderWritingStudentData();
+  return subTabs + body;
+}
+
+async function renderWritingStudentData(){
+  const students = (await dbGetAllByIndex('students','classId', state.currentClassId))
+    .filter(s=>s.active!==false).sort((a,b)=>a.name.localeCompare(b.name));
+  if(students.length===0) return `<div class="empty">No students yet.</div>`;
+  if(!state.writingDataSelectedStudentId || !students.find(s=>s.id===state.writingDataSelectedStudentId)){
+    state.writingDataSelectedStudentId = students[0].id;
+  }
+  const selectHtml = `<select id="writing-data-student-select" style="max-width:280px; margin-bottom:14px;">
+    ${students.map(s=>`<option value="${s.id}" ${s.id===state.writingDataSelectedStudentId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}
+  </select>`;
+
+  const assessments = (await dbGetAllByIndex('writingAssessments','classId', state.currentClassId))
+    .sort((a,b)=> (a.dueDate||'').localeCompare(b.dueDate||''));
+
+  if(state.writingDataSelectedAssessmentId && !assessments.find(a=>a.id===state.writingDataSelectedAssessmentId)){
+    state.writingDataSelectedAssessmentId = null;
+  }
+
+  if(state.writingDataSelectedAssessmentId){
+    const a = assessments.find(x=>x.id===state.writingDataSelectedAssessmentId);
+    const agg = await computeStudentWritingAggregate(state.currentClassId, state.writingDataSelectedStudentId, state.writingDataSelectedAssessmentId);
+    return `
+      ${selectHtml}
+      <div class="row between" style="margin-bottom:10px;">
+        <button class="btn ghost" id="writing-data-back-to-overview">&larr; All Assessments Overview</button>
+        <strong>${escapeHtml(a ? a.title : '')}</strong>
+      </div>
+      ${writingAggregateSummaryHtml(agg, 'This Assessment')}
+      <div class="grid-cards" style="margin-top:14px;">
+        <div class="card"><canvas id="writing-student-pos-pie"></canvas></div>
+        <div class="card"><canvas id="writing-student-neg-pie"></canvas></div>
+      </div>
+    `;
+  }
+
+  const agg = await computeStudentWritingAggregate(state.currentClassId, state.writingDataSelectedStudentId, null);
+  const assessmentListHtml = assessments.length
+    ? assessments.map(a=>`<div class="card clickable" data-writing-data-open-assessment="${a.id}"><strong>${escapeHtml(a.title)}</strong> <span class="muted">&middot; Due ${formatDateNice(a.dueDate)}</span></div>`).join('')
+    : `<div class="empty">No assessments logged yet.</div>`;
+
+  return `
+    ${selectHtml}
+    ${writingAggregateSummaryHtml(agg, 'All Assessments')}
+    <div class="grid-cards" style="margin-top:14px;">
+      <div class="card"><canvas id="writing-student-pos-pie"></canvas></div>
+      <div class="card"><canvas id="writing-student-neg-pie"></canvas></div>
+    </div>
+    <div class="card" style="margin-top:14px;"><canvas id="writing-student-trend"></canvas></div>
+    <h4 style="margin-top:18px;">Individual Assessments</h4>
+    ${assessmentListHtml}
+  `;
+}
+
+async function renderWritingClassData(){
+  const assessments = (await dbGetAllByIndex('writingAssessments','classId', state.currentClassId))
+    .sort((a,b)=> (a.dueDate||'').localeCompare(b.dueDate||''));
+
+  if(state.writingDataSelectedAssessmentId && !assessments.find(a=>a.id===state.writingDataSelectedAssessmentId)){
+    state.writingDataSelectedAssessmentId = null;
+  }
+
+  const agg = await computeClassWritingAggregate(state.currentClassId, state.writingDataSelectedAssessmentId);
+
+  const scopeControlsHtml = state.writingDataSelectedAssessmentId
+    ? `<div class="row between" style="margin-bottom:10px;">
+         <button class="btn ghost" id="writing-class-data-back-to-overview">&larr; All Assessments Overview</button>
+         <strong>${escapeHtml((assessments.find(a=>a.id===state.writingDataSelectedAssessmentId)||{}).title||'')}</strong>
+       </div>`
+    : '';
+
+  const assessmentPickerHtml = !state.writingDataSelectedAssessmentId && assessments.length
+    ? `<div class="field">
+        <label>View a single assessment instead (optional)</label>
+        <select id="writing-class-data-assessment-select">
+          <option value="">-- All assessments combined --</option>
+          ${assessments.map(a=>`<option value="${a.id}">${escapeHtml(a.title)}</option>`).join('')}
+        </select>
+      </div>`
+    : '';
+
+  const trendBlock = state.writingDataSelectedAssessmentId
+    ? '' // a trend line needs more than one assessment to be meaningful
+    : `<div class="card" style="margin-top:14px;"><canvas id="writing-class-trend"></canvas></div>`;
+
+  return `
+    ${scopeControlsHtml}
+    ${assessmentPickerHtml}
+    ${writingAggregateSummaryHtml(agg, state.writingDataSelectedAssessmentId ? 'This Assessment' : 'All Assessments')}
+    ${trendBlock}
+    <div class="card" style="margin-top:14px;"><canvas id="writing-class-scatter"></canvas></div>
+  `;
 }
 
 async function renderWritingAssessmentList(){
@@ -2252,7 +2671,9 @@ async function renderWritingAssessmentList(){
           <strong>${escapeHtml(a.title)}</strong>
           <span class="tag neutral">${a.type==='summative'?'Summative':'Formative'}</span>
         </div>
-        <div class="muted" style="margin-top:4px;">Due ${formatDateNice(a.dueDate)} &middot; ${submitted}/${students.length} complete (${pct}%)</div>
+        <div class="muted" style="margin-top:4px;">
+          ${a.subject ? `${escapeHtml(a.subject)}${isLitAssessment(a) ? ` &middot; ${a.subjectMeta.paper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(a.subjectMeta.level||'')}` : ''} &middot; ` : ''}Due ${formatDateNice(a.dueDate)} &middot; ${submitted}/${students.length} complete (${pct}%)
+        </div>
       </div>`);
   }
   return `<div class="row" style="margin-bottom:14px;">${addBtn}</div><div class="grid-cards">${cardsHtml.join('')}</div>`;
@@ -2299,7 +2720,7 @@ async function renderWritingAssessmentDetail(assessmentId){
     </div>
     <h3>${escapeHtml(assessment.title)}</h3>
     <div class="muted" style="margin-bottom:14px;">
-      ${assessment.type==='summative'?'Summative':'Formative'} &middot; ${assessment.mode==='in_class_timed'?'In-Class Timed':'Take Home'} &middot; Due ${formatDateNice(assessment.dueDate)} &middot; ${submittedCount}/${students.length} complete (${pct}%)
+      ${assessment.subject ? `${escapeHtml(assessment.subject)}${isLitAssessment(assessment) ? ` &middot; ${assessment.subjectMeta.paper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(assessment.subjectMeta.level||'')}` : ''} &middot; ` : ''}${assessment.type==='summative'?'Summative':'Formative'} &middot; ${assessment.mode==='in_class_timed'?'In-Class Timed':'Take Home'} &middot; Due ${formatDateNice(assessment.dueDate)} &middot; ${submittedCount}/${students.length} complete (${pct}%)
     </div>
     ${rows.join('')}
   `;
@@ -2333,14 +2754,17 @@ async function renderWritingStudentPage(assessmentId, studentId){
     return `${backBtn}<div class="card" style="margin-top:10px;">${writingReportContentHtml(assessment, student, feedback, tally)}</div>${actionsHtml}`;
   }
 
-  const negSkills = writingSkillsForAssessment(assessment, WRITING_SKILLS_NEGATIVE);
-  const posSkills = writingSkillsForAssessment(assessment, WRITING_SKILLS_POSITIVE);
+  const isLit = isLitAssessment(assessment);
+  const negSkills = writingNegSkillsForAssessment(assessment);
+  const posSkills = writingPosSkillsForAssessment(assessment);
   const skillButtonHtml = (skill, polarity) => {
     const bucket = polarity==='negative' ? tally.neg : tally.pos;
     const t = bucket[skill.key];
     const count = t ? t.count : 0;
+    // For Lit assessments, tapping a feedback module opens a modal (quote + which Criteria
+    // this tap applies to) instead of the plain quote-only prompt used by every other subject.
     return `
-      <div class="cat-btn" style="cursor:pointer;" data-wa-skill="${skill.key}" data-wa-polarity="${polarity}">
+      <div class="cat-btn" style="cursor:pointer;" data-wa-skill="${skill.key}" data-wa-polarity="${polarity}" ${isLit?'data-wa-lit-tag="1"':''}>
         <div style="display:flex; align-items:center; justify-content:space-between;">
           <span>${escapeHtml(skill.label)}</span>
           <span class="row" style="gap:8px;">
@@ -2353,26 +2777,40 @@ async function renderWritingStudentPage(assessmentId, studentId){
   };
 
   const scoreSectionsHtml = [];
-  if(assessment.methods.includes('dp_scale')){
-    scoreSectionsHtml.push(`
-      <div class="field">
-        <label>DP Score (1-7)</label>
-        <div>${[1,2,3,4,5,6,7].map(n=>`<span class="chip ${feedback.scores.dp===n?'selected':''}" data-wa-score="dp" data-wa-value="${n}">${n}</span>`).join('')}</div>
-      </div>`);
-  }
-  if(assessment.methods.includes('myp_scale')){
-    scoreSectionsHtml.push(`
-      <div class="field">
-        <label>MYP Score (1-8)</label>
-        <div>${[1,2,3,4,5,6,7,8].map(n=>`<span class="chip ${feedback.scores.myp===n?'selected':''}" data-wa-score="myp" data-wa-value="${n}">${n}</span>`).join('')}</div>
-      </div>`);
-  }
-  if(assessment.methods.includes('be_ae_me_ee')){
-    scoreSectionsHtml.push(`
-      <div class="field">
-        <label>Level</label>
-        <div>${['BE','AE','ME','EE'].map(l=>`<span class="chip ${feedback.scores.level===l?'selected':''}" data-wa-score="level" data-wa-value="${l}">${l}</span>`).join('')}</div>
-      </div>`);
+  if(isLit){
+    const total = computeWritingCriteriaTotal(assessment, feedback);
+    assessment.subjectMeta.criteria.forEach(c=>{
+      const current = feedback.scores.criteria ? feedback.scores.criteria[c.code] : null;
+      const options = []; for(let n=0;n<=c.maxScore;n++) options.push(n);
+      scoreSectionsHtml.push(`
+        <div class="field">
+          <label>${escapeHtml(c.code)}: ${escapeHtml(c.label)} (out of ${c.maxScore})</label>
+          <div>${options.map(n=>`<span class="chip ${current===n?'selected':''}" data-wa-criteria-score="${escapeHtml(c.code)}" data-wa-value="${n}">${n}</span>`).join('')}</div>
+        </div>`);
+    });
+    scoreSectionsHtml.push(`<div class="muted" style="margin-top:4px;">Total: ${total.total} / ${total.max}${total.complete?'':' (not all criteria scored yet)'}</div>`);
+  } else {
+    if(assessment.methods.includes('dp_scale')){
+      scoreSectionsHtml.push(`
+        <div class="field">
+          <label>DP Score (1-7)</label>
+          <div>${[1,2,3,4,5,6,7].map(n=>`<span class="chip ${feedback.scores.dp===n?'selected':''}" data-wa-score="dp" data-wa-value="${n}">${n}</span>`).join('')}</div>
+        </div>`);
+    }
+    if(assessment.methods.includes('myp_scale')){
+      scoreSectionsHtml.push(`
+        <div class="field">
+          <label>MYP Score (1-8)</label>
+          <div>${[1,2,3,4,5,6,7,8].map(n=>`<span class="chip ${feedback.scores.myp===n?'selected':''}" data-wa-score="myp" data-wa-value="${n}">${n}</span>`).join('')}</div>
+        </div>`);
+    }
+    if(assessment.methods.includes('be_ae_me_ee')){
+      scoreSectionsHtml.push(`
+        <div class="field">
+          <label>Level</label>
+          <div>${['BE','AE','ME','EE'].map(l=>`<span class="chip ${feedback.scores.level===l?'selected':''}" data-wa-score="level" data-wa-value="${l}">${l}</span>`).join('')}</div>
+        </div>`);
+    }
   }
 
   return `
@@ -2402,20 +2840,112 @@ async function renderWritingStudentPage(assessmentId, studentId){
 /* ============ WRITING ASSESSMENT: wizard ============ */
 async function openWritingAssessmentWizard(){
   const draft = {
+    subject: null, litPaper: null, litLevel: null,
     title:'', type:'formative', mode:'in_class_timed', dueDate: todayStr(),
-    writingType: WRITING_TYPES[0], writingTypeOther:'', methods:[], prompt:'', promptNA:false
+    writingType: WRITING_TYPES[0], writingTypeOther:'', litWritingTypeText:'', methods:[], prompt:'', promptNA:false,
+    criteria: null // lazily built from LIT_CRITERIA_PAPER1/2 once paper is known
   };
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.id = 'wa-wizard-backdrop';
+  const isLit = ()=> draft.subject === 'Eng Lit DP';
 
   function syncFormValues(){
     const titleEl = backdrop.querySelector('#wa-title'); if(titleEl) draft.title = titleEl.value;
     const dueEl = backdrop.querySelector('#wa-due-date'); if(dueEl) draft.dueDate = dueEl.value;
     const otherEl = backdrop.querySelector('#wa-writing-type-other'); if(otherEl) draft.writingTypeOther = otherEl.value;
+    const litTypeEl = backdrop.querySelector('#wa-lit-writing-type'); if(litTypeEl) draft.litWritingTypeText = litTypeEl.value;
     const promptEl = backdrop.querySelector('#wa-prompt'); if(promptEl && !draft.promptNA) draft.prompt = promptEl.value;
   }
 
+  function ensureLitCriteria(){
+    if(!draft.criteria){
+      draft.criteria = litCriteriaForPaper(draft.litPaper).map(c=>({
+        code:c.code, label:c.label, groupLabel:c.groupLabel||null, selected:true,
+        strands: c.strands.map(text=>({ text, selected:true, taskDescription:'', descOpen:false }))
+      }));
+    }
+  }
+
+  /* ---- Step 0: Subject ---- */
+  function renderSubjectStep(){
+    backdrop.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Add Writing Assessment</h3>
+          <button class="icon-btn" id="close-wa-wizard">&times;</button>
+        </div>
+        <div class="field">
+          <label>Which subject is this for?</label>
+          <div>${SUBJECTS.map(s=>`<span class="chip ${draft.subject===s?'selected':''}" data-wa-subject="${escapeHtml(s)}">${escapeHtml(s)}</span>`).join('')}</div>
+        </div>
+        <button class="btn primary block" id="wa-subject-next-btn">Next</button>
+      </div>
+    `;
+    backdrop.querySelector('#close-wa-wizard').addEventListener('click', ()=>backdrop.remove());
+    backdrop.querySelectorAll('[data-wa-subject]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        draft.subject = el.getAttribute('data-wa-subject');
+        renderSubjectStep();
+      });
+    });
+    backdrop.querySelector('#wa-subject-next-btn').addEventListener('click', ()=>{
+      if(!draft.subject){ toast('Please choose a subject'); return; }
+      if(isLit()) renderLitPaperLevelStep(); else renderForm();
+    });
+  }
+
+  /* ---- Step 0b (Eng Lit DP only): Paper + Level ---- */
+  function renderLitPaperLevelStep(){
+    backdrop.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Eng Lit DP</h3>
+          <button class="icon-btn" id="close-wa-wizard">&times;</button>
+        </div>
+        <div class="field">
+          <label>Paper</label>
+          <div>
+            <span class="chip ${draft.litPaper==='paper1'?'selected':''}" data-wa-lit-paper="paper1">Paper 1</span>
+            <span class="chip ${draft.litPaper==='paper2'?'selected':''}" data-wa-lit-paper="paper2">Paper 2</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Level</label>
+          <div>
+            <span class="chip ${draft.litLevel==='SL'?'selected':''}" data-wa-lit-level="SL">SL</span>
+            <span class="chip ${draft.litLevel==='HL'?'selected':''}" data-wa-lit-level="HL">HL</span>
+          </div>
+        </div>
+        <div class="row" style="margin-top:14px;">
+          <button class="btn ghost" id="wa-lit-back-btn">&larr; Back</button>
+          <button class="btn primary" id="wa-lit-next-btn">Next</button>
+        </div>
+      </div>
+    `;
+    backdrop.querySelector('#close-wa-wizard').addEventListener('click', ()=>backdrop.remove());
+    backdrop.querySelectorAll('[data-wa-lit-paper]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        draft.litPaper = el.getAttribute('data-wa-lit-paper');
+        draft.criteria = null; // paper changed -- rebuild criteria list when we get there
+        renderLitPaperLevelStep();
+      });
+    });
+    backdrop.querySelectorAll('[data-wa-lit-level]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        draft.litLevel = el.getAttribute('data-wa-lit-level');
+        renderLitPaperLevelStep();
+      });
+    });
+    backdrop.querySelector('#wa-lit-back-btn').addEventListener('click', ()=> renderSubjectStep());
+    backdrop.querySelector('#wa-lit-next-btn').addEventListener('click', ()=>{
+      if(!draft.litPaper){ toast('Please choose Paper 1 or Paper 2'); return; }
+      if(!draft.litLevel){ toast('Please choose SL or HL'); return; }
+      renderForm();
+    });
+  }
+
+  /* ---- Step 1: existing fields (Writing Type becomes free text for Lit; methods hidden for Lit) ---- */
   function renderForm(){
     backdrop.innerHTML = `
       <div class="modal">
@@ -2423,6 +2953,7 @@ async function openWritingAssessmentWizard(){
           <h3>Add Writing Assessment</h3>
           <button class="icon-btn" id="close-wa-wizard">&times;</button>
         </div>
+        <div class="muted" style="margin-bottom:10px;">${escapeHtml(draft.subject)}${isLit() ? ` &middot; ${draft.litPaper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(draft.litLevel)}` : ''}</div>
         <div class="field">
           <label>Title</label>
           <input type="text" id="wa-title" placeholder="e.g. Unseen Poetry Analysis" value="${escapeHtml(draft.title)}">
@@ -2445,6 +2976,11 @@ async function openWritingAssessmentWizard(){
           <label>Due Date</label>
           <input type="date" id="wa-due-date" value="${draft.dueDate}">
         </div>
+        ${isLit() ? `
+        <div class="field">
+          <label>Writing Type</label>
+          <input type="text" id="wa-lit-writing-type" placeholder="Describe the writing type" value="${escapeHtml(draft.litWritingTypeText)}">
+        </div>` : `
         <div class="field">
           <label>Writing Type</label>
           <div>${WRITING_TYPES.map(t=>`<span class="chip ${draft.writingType===t?'selected':''}" data-wa-field="writingType" data-wa-val="${escapeHtml(t)}">${escapeHtml(t)}</span>`).join('')}</div>
@@ -2453,13 +2989,16 @@ async function openWritingAssessmentWizard(){
         <div class="field">
           <label>How will it be assessed? (select all that apply)</label>
           <div>${WRITING_ASSESSMENT_METHODS.map(m=>`<span class="chip ${draft.methods.includes(m.key)?'selected':''}" data-wa-method="${m.key}">${escapeHtml(m.label)}</span>`).join('')}</div>
-        </div>
+        </div>`}
         <div class="field">
-          <label>Essay Prompt / Question</label>
-          <textarea id="wa-prompt" placeholder="Paste or type the prompt..." ${draft.promptNA?'disabled':''}>${draft.promptNA ? '' : escapeHtml(draft.prompt)}</textarea>
+          <label>${isLit() ? 'Describe the Task' : 'Essay Prompt / Question'}</label>
+          <textarea id="wa-prompt" placeholder="${isLit() ? 'Describe the task in a clear and relevant way...' : 'Paste or type the prompt...'}" ${draft.promptNA?'disabled':''}>${draft.promptNA ? '' : escapeHtml(draft.prompt)}</textarea>
           <div style="margin-top:6px;"><span class="chip ${draft.promptNA?'selected':''}" id="wa-prompt-na">Not Applicable</span></div>
         </div>
-        <button class="btn primary block" id="wa-to-preview-btn">Preview</button>
+        <div class="row" style="margin-top:14px;">
+          <button class="btn ghost" id="wa-form-back-btn">&larr; Back</button>
+          <button class="btn primary" id="wa-to-preview-btn">Preview</button>
+        </div>
       </div>
     `;
     backdrop.querySelector('#close-wa-wizard').addEventListener('click', ()=>backdrop.remove());
@@ -2485,16 +3024,25 @@ async function openWritingAssessmentWizard(){
       draft.promptNA = !draft.promptNA;
       renderForm();
     });
+    backdrop.querySelector('#wa-form-back-btn').addEventListener('click', ()=>{
+      syncFormValues();
+      if(isLit()) renderLitPaperLevelStep(); else renderSubjectStep();
+    });
     backdrop.querySelector('#wa-to-preview-btn').addEventListener('click', ()=>{
       syncFormValues();
       if(!draft.title.trim()){ toast('Please enter a title'); return; }
-      if(draft.writingType==='Other' && !draft.writingTypeOther.trim()){ toast('Please describe the writing type'); return; }
+      if(isLit()){
+        if(!draft.litWritingTypeText.trim()){ toast('Please describe the writing type'); return; }
+      } else if(draft.writingType==='Other' && !draft.writingTypeOther.trim()){
+        toast('Please describe the writing type'); return;
+      }
       renderPreview();
     });
   }
 
+  /* ---- Step 2: Preview ---- */
   function renderPreview(){
-    const finalWritingType = draft.writingType==='Other' ? draft.writingTypeOther.trim() : draft.writingType;
+    const finalWritingType = isLit() ? draft.litWritingTypeText.trim() : (draft.writingType==='Other' ? draft.writingTypeOther.trim() : draft.writingType);
     const methodsLabel = draft.methods.length
       ? draft.methods.map(k=> (WRITING_ASSESSMENT_METHODS.find(m=>m.key===k)||{}).label).join(', ')
       : 'None selected';
@@ -2505,27 +3053,178 @@ async function openWritingAssessmentWizard(){
           <button class="icon-btn" id="close-wa-wizard2">&times;</button>
         </div>
         <div class="card">
-          <div><strong>${escapeHtml(draft.title)}</strong></div>
+          <div class="muted">${escapeHtml(draft.subject)}${isLit() ? ` &middot; ${draft.litPaper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(draft.litLevel)}` : ''}</div>
+          <div style="margin-top:4px;"><strong>${escapeHtml(draft.title)}</strong></div>
           <div class="muted" style="margin-top:4px;">${draft.type==='summative'?'Summative':'Formative'} &middot; ${draft.mode==='in_class_timed'?'In-Class Timed':'Take Home'} &middot; Due ${formatDateNice(draft.dueDate)}</div>
           <div style="margin-top:8px;"><strong>Writing Type:</strong> ${escapeHtml(finalWritingType)}</div>
-          <div style="margin-top:8px;"><strong>Assessed via:</strong> ${escapeHtml(methodsLabel)}</div>
-          <div style="margin-top:8px;"><strong>Prompt:</strong> ${draft.promptNA ? 'Not Applicable' : (draft.prompt.trim() ? escapeHtml(draft.prompt) : '<span class="muted">(none entered)</span>')}</div>
+          ${isLit() ? '' : `<div style="margin-top:8px;"><strong>Assessed via:</strong> ${escapeHtml(methodsLabel)}</div>`}
+          <div style="margin-top:8px;"><strong>${isLit()?'Task Prompt':'Prompt'}:</strong> ${draft.promptNA ? 'Not Applicable' : (draft.prompt.trim() ? escapeHtml(draft.prompt) : '<span class="muted">(none entered)</span>')}</div>
         </div>
         <div class="row" style="margin-top:14px;">
           <button class="btn ghost" id="wa-back-to-form-btn">&larr; Edit</button>
-          <button class="btn primary" id="wa-confirm-btn">Confirm</button>
+          ${isLit()
+            ? `<button class="btn primary" id="wa-to-criteria-btn">Submit and Select Criteria / Strands</button>`
+            : `<button class="btn primary" id="wa-confirm-btn">Confirm</button>`}
         </div>
       </div>
     `;
     backdrop.querySelector('#close-wa-wizard2').addEventListener('click', ()=>backdrop.remove());
     backdrop.querySelector('#wa-back-to-form-btn').addEventListener('click', ()=> renderForm());
-    backdrop.querySelector('#wa-confirm-btn').addEventListener('click', async ()=>{
-      const assessment = {
+
+    function buildBaseAssessment(){
+      return {
         id: uuid(), classId: state.currentClassId, title: draft.title.trim(),
         type: draft.type, mode: draft.mode, dueDate: draft.dueDate,
-        writingType: finalWritingType, methods: draft.methods.slice(),
+        subject: draft.subject,
+        writingType: finalWritingType, methods: isLit() ? [] : draft.methods.slice(),
         prompt: draft.promptNA ? null : (draft.prompt.trim() || null),
-        createdAt: Date.now()
+        createdAt: Date.now(), subjectMeta: null
+      };
+    }
+
+    const confirmBtn = backdrop.querySelector('#wa-confirm-btn');
+    if(confirmBtn) confirmBtn.addEventListener('click', async ()=>{
+      const assessment = buildBaseAssessment();
+      await dbAdd('writingAssessments', assessment);
+      backdrop.remove();
+      state.writingSelectedAssessmentId = assessment.id;
+      state.writingView = 'detail';
+      toast('Assessment created', 'good');
+      render();
+    });
+
+    const criteriaBtn = backdrop.querySelector('#wa-to-criteria-btn');
+    if(criteriaBtn) criteriaBtn.addEventListener('click', ()=>{
+      draft.pendingAssessment = buildBaseAssessment();
+      ensureLitCriteria();
+      renderCriteriaStep();
+    });
+  }
+
+  /* ---- Step 3 (Eng Lit DP only): select which Criteria apply ---- */
+  function renderCriteriaStep(){
+    const groups = [];
+    const seenGroups = {};
+    draft.criteria.forEach(c=>{
+      if(c.groupLabel){
+        if(!seenGroups[c.groupLabel]){ seenGroups[c.groupLabel] = { groupLabel:c.groupLabel, items:[] }; groups.push(seenGroups[c.groupLabel]); }
+        seenGroups[c.groupLabel].items.push(c);
+      } else {
+        groups.push({ groupLabel:null, items:[c] });
+      }
+    });
+    const rowsHtml = groups.map(g=>`
+      ${g.groupLabel ? `<div class="muted" style="margin-top:10px;"><strong>${escapeHtml(g.groupLabel)}</strong></div>` : ''}
+      ${g.items.map(c=>`
+        <label class="card row between" style="cursor:pointer; margin-top:6px;">
+          <span>${escapeHtml(c.code)}: ${escapeHtml(c.label)}</span>
+          <input type="checkbox" data-wa-criterion="${escapeHtml(c.code)}" ${c.selected?'checked':''}>
+        </label>`).join('')}
+    `).join('');
+    backdrop.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Select Criteria</h3>
+          <button class="icon-btn" id="close-wa-wizard">&times;</button>
+        </div>
+        <div class="row" style="margin-bottom:8px;">
+          <button class="btn small ghost" id="wa-criteria-select-all">Select All</button>
+          <button class="btn small ghost" id="wa-criteria-select-none">Select None</button>
+        </div>
+        ${rowsHtml}
+        <div class="row" style="margin-top:14px;">
+          <button class="btn ghost" id="wa-criteria-back-btn">&larr; Back</button>
+          <button class="btn primary" id="wa-criteria-next-btn">Next</button>
+        </div>
+      </div>
+    `;
+    backdrop.querySelector('#close-wa-wizard').addEventListener('click', ()=>backdrop.remove());
+    backdrop.querySelectorAll('[data-wa-criterion]').forEach(el=>{
+      el.addEventListener('change', ()=>{
+        const c = draft.criteria.find(x=>x.code===el.getAttribute('data-wa-criterion'));
+        if(c) c.selected = el.checked;
+      });
+    });
+    backdrop.querySelector('#wa-criteria-select-all').addEventListener('click', ()=>{
+      draft.criteria.forEach(c=>c.selected=true); renderCriteriaStep();
+    });
+    backdrop.querySelector('#wa-criteria-select-none').addEventListener('click', ()=>{
+      draft.criteria.forEach(c=>c.selected=false); renderCriteriaStep();
+    });
+    backdrop.querySelector('#wa-criteria-back-btn').addEventListener('click', ()=> renderPreview());
+    backdrop.querySelector('#wa-criteria-next-btn').addEventListener('click', ()=>{
+      if(!draft.criteria.some(c=>c.selected)){ toast('Please select at least one criterion'); return; }
+      renderStrandsStep();
+    });
+  }
+
+  /* ---- Step 4 (Eng Lit DP only): select Strands per selected Criterion, with optional task-specific description ---- */
+  function renderStrandsStep(){
+    const selected = draft.criteria.filter(c=>c.selected);
+    const blocksHtml = selected.map(c=>`
+      <div class="card" style="margin-top:10px;">
+        <strong>${escapeHtml(c.code)}: ${escapeHtml(c.label)}</strong>
+        ${c.strands.map((s,i)=>`
+          <div style="margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">
+            <label style="cursor:pointer; display:flex; align-items:flex-start; gap:8px;">
+              <input type="checkbox" data-wa-strand="${escapeHtml(c.code)}|${i}" ${s.selected?'checked':''} style="margin-top:3px;">
+              <span>${escapeHtml(s.text)}</span>
+            </label>
+            <div style="margin-top:6px;">
+              <span class="btn small ghost" data-wa-strand-desc-toggle="${escapeHtml(c.code)}|${i}">${s.descOpen ? '- Hide' : '+ Add'} task-specific description</span>
+            </div>
+            ${s.descOpen ? `<textarea data-wa-strand-desc="${escapeHtml(c.code)}|${i}" placeholder="Optional: describe how this strand applies to this specific task..." style="margin-top:6px;">${escapeHtml(s.taskDescription)}</textarea>` : ''}
+          </div>`).join('')}
+      </div>
+    `).join('');
+    backdrop.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Select Strands</h3>
+          <button class="icon-btn" id="close-wa-wizard">&times;</button>
+        </div>
+        <div class="muted">For each criterion, select all or some of its strands. Use "+ Add" for an optional task-specific note.</div>
+        ${blocksHtml}
+        <div class="row" style="margin-top:14px;">
+          <button class="btn ghost" id="wa-strands-back-btn">&larr; Back</button>
+          <button class="btn primary" id="wa-strands-save-btn">Save Assessment</button>
+        </div>
+      </div>
+    `;
+    backdrop.querySelector('#close-wa-wizard').addEventListener('click', ()=>backdrop.remove());
+    function findStrand(key){
+      const [code, idxStr] = key.split('|');
+      const c = draft.criteria.find(x=>x.code===code);
+      return c ? c.strands[parseInt(idxStr,10)] : null;
+    }
+    backdrop.querySelectorAll('[data-wa-strand]').forEach(el=>{
+      el.addEventListener('change', ()=>{
+        const s = findStrand(el.getAttribute('data-wa-strand'));
+        if(s) s.selected = el.checked;
+      });
+    });
+    backdrop.querySelectorAll('[data-wa-strand-desc-toggle]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const s = findStrand(el.getAttribute('data-wa-strand-desc-toggle'));
+        if(s){ s.descOpen = !s.descOpen; renderStrandsStep(); }
+      });
+    });
+    backdrop.querySelectorAll('[data-wa-strand-desc]').forEach(el=>{
+      el.addEventListener('input', ()=>{
+        const s = findStrand(el.getAttribute('data-wa-strand-desc'));
+        if(s) s.taskDescription = el.value;
+      });
+    });
+    backdrop.querySelector('#wa-strands-back-btn').addEventListener('click', ()=> renderCriteriaStep());
+    backdrop.querySelector('#wa-strands-save-btn').addEventListener('click', async ()=>{
+      const maxScore = litCriterionMaxScore(draft.litPaper, draft.litLevel);
+      const assessment = draft.pendingAssessment;
+      assessment.subjectMeta = {
+        paper: draft.litPaper, level: draft.litLevel,
+        criteria: draft.criteria.filter(c=>c.selected).map(c=>({
+          code:c.code, label:c.label, groupLabel:c.groupLabel||null, selected:true, maxScore,
+          strands: c.strands.filter(s=>s.selected).map(s=>({ text:s.text, selected:true, taskDescription:(s.taskDescription||'').trim() }))
+        }))
       };
       await dbAdd('writingAssessments', assessment);
       backdrop.remove();
@@ -2536,27 +3235,31 @@ async function openWritingAssessmentWizard(){
     });
   }
 
-  renderForm();
+  renderSubjectStep();
   document.body.appendChild(backdrop);
 }
 
 /* ============ WRITING ASSESSMENT: manage entries modal ============ */
 async function openManageWritingEntriesModal(polarity, skillKey){
+  const assessment = await dbGet('writingAssessments', state.writingSelectedAssessmentId);
   const events = (await dbGetAllByIndex('writingEvents','assessmentId', state.writingSelectedAssessmentId))
     .filter(e=>e.studentId===state.writingSelectedStudentId && e.polarity===polarity && e.skillKey===skillKey)
     .sort((a,b)=>a.timestamp-b.timestamp);
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.id = 'wa-manage-modal-backdrop';
-  const rowsHtml = events.map((e,i)=>`
+  const rowsHtml = events.map((e,i)=>{
+    const criteriaLabel = (e.criteriaCodes && e.criteriaCodes.length) ? `<div class="muted" style="margin-top:2px;">Tagged to: ${e.criteriaCodes.map(escapeHtml).join(', ')}</div>` : '';
+    return `
     <div class="row between" style="padding:8px 0; border-bottom:1px solid var(--line);">
-      <span>${i+1}. ${e.quote ? `&ldquo;${escapeHtml(e.quote)}&rdquo;` : '<span class="muted">(no excerpt)</span>'}</span>
+      <span>${i+1}. ${e.quote ? `&ldquo;${escapeHtml(e.quote)}&rdquo;` : '<span class="muted">(no excerpt)</span>'}${criteriaLabel}</span>
       <button class="btn small danger" data-remove-entry="${e.id}">Remove</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   backdrop.innerHTML = `
     <div class="modal">
       <div class="modal-header">
-        <h3>${escapeHtml(writingSkillLabel(polarity, skillKey))}</h3>
+        <h3>${escapeHtml(writingSkillLabel(polarity, skillKey, assessment))}</h3>
         <button class="icon-btn" id="close-wa-manage-modal">&times;</button>
       </div>
       ${rowsHtml || '<div class="empty">No entries.</div>'}
@@ -2569,6 +3272,50 @@ async function openManageWritingEntriesModal(polarity, skillKey){
       backdrop.remove();
       render();
     });
+  });
+}
+
+// For Eng Lit DP taps: instead of the plain quote-only prompt every other subject uses, this
+// modal also lets the teacher multi-select which of the assessment's chosen Criteria the tap
+// applies to -- that tagging is what lets the report later auto-attribute feedback to the
+// Criterion that explains the score the student received.
+async function openLitTapModal(assessment, polarity, skillKey){
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'wa-lit-tap-modal-backdrop';
+  const criteria = assessment.subjectMeta.criteria;
+  backdrop.innerHTML = `
+    <div class="modal">
+      <div class="modal-header">
+        <h3>${escapeHtml(writingSkillLabel(polarity, skillKey, assessment))}</h3>
+        <button class="icon-btn" id="close-wa-lit-tap-modal">&times;</button>
+      </div>
+      <div class="field">
+        <label>Paragraph # / Sentence # or Quote (optional)</label>
+        <textarea id="wa-lit-tap-quote" placeholder="e.g. Para 2, Sentence 3 -- or paste the quote..."></textarea>
+      </div>
+      <div class="field">
+        <label>Which Criteria does this apply to? (optional, select any)</label>
+        <div>${criteria.map(c=>`
+          <label class="card row between" style="cursor:pointer; margin-top:6px;">
+            <span>${escapeHtml(c.code)}: ${escapeHtml(c.label)}</span>
+            <input type="checkbox" data-wa-lit-tap-criterion="${escapeHtml(c.code)}">
+          </label>`).join('')}</div>
+      </div>
+      <button class="btn primary block" id="wa-lit-tap-save-btn">Save</button>
+    </div>`;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#close-wa-lit-tap-modal').addEventListener('click', ()=> backdrop.remove());
+  backdrop.querySelector('#wa-lit-tap-save-btn').addEventListener('click', async ()=>{
+    const quote = backdrop.querySelector('#wa-lit-tap-quote').value.trim();
+    const criteriaCodes = Array.from(backdrop.querySelectorAll('[data-wa-lit-tap-criterion]:checked')).map(el=>el.getAttribute('data-wa-lit-tap-criterion'));
+    await dbAdd('writingEvents', {
+      id: uuid(), assessmentId: state.writingSelectedAssessmentId, classId: state.currentClassId,
+      studentId: state.writingSelectedStudentId, polarity, skillKey,
+      quote: quote || null, criteriaCodes, timestamp: Date.now()
+    });
+    backdrop.remove();
+    render();
   });
 }
 
@@ -2670,6 +3417,11 @@ function wireWritingTabEvents(){
       if(ev.target.closest('[data-wa-manage]')) return;
       const skillKey = el.getAttribute('data-wa-skill');
       const polarity = el.getAttribute('data-wa-polarity');
+      if(el.getAttribute('data-wa-lit-tag')){
+        const assessment = await dbGet('writingAssessments', state.writingSelectedAssessmentId);
+        await openLitTapModal(assessment, polarity, skillKey);
+        return;
+      }
       const quote = window.prompt('Quote the specific word, phrase, or sentence (optional) — Cancel to skip:');
       await dbAdd('writingEvents', {
         id: uuid(), assessmentId: state.writingSelectedAssessmentId, classId: state.currentClassId,
@@ -2694,6 +3446,19 @@ function wireWritingTabEvents(){
       if(field==='dp' || field==='myp') value = parseInt(value,10);
       const feedback = await getOrCreateWritingFeedbackRecord(state.writingSelectedAssessmentId, state.currentClassId, state.writingSelectedStudentId);
       feedback.scores[field] = (feedback.scores[field] === value) ? null : value;
+      feedback.updatedAt = Date.now();
+      await dbPut('writingFeedback', feedback);
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-wa-criteria-score]').forEach(el=>{
+    el.addEventListener('click', async ()=>{
+      const code = el.getAttribute('data-wa-criteria-score');
+      const value = parseInt(el.getAttribute('data-wa-value'),10);
+      const feedback = await getOrCreateWritingFeedbackRecord(state.writingSelectedAssessmentId, state.currentClassId, state.writingSelectedStudentId);
+      if(!feedback.scores.criteria) feedback.scores.criteria = {};
+      feedback.scores.criteria[code] = (feedback.scores.criteria[code] === value) ? null : value;
       feedback.updatedAt = Date.now();
       await dbPut('writingFeedback', feedback);
       render();
