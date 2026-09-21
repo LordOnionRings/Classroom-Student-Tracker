@@ -449,6 +449,111 @@ function litModulesForPaper(paper){
 function litCriterionMaxScore(paper, level){
   return (paper==='paper1' && level==='HL') ? 10 : 5;
 }
+
+/* ============ WRITING ASSESSMENT: I&S MYP criteria & strands ============ */
+// Strand wording is grade-band specific per the official IB MYP Individuals and Societies guide
+// (Year 1 = G6/7, Year 3 = G8/9, Year 5 = G10, confirmed with Mike). All four criteria are flat
+// Maximum: 8 in every year band -- I&S has no HL/SL-style doubling the way Eng Lit DP does.
+const IS_CRITERIA_YEAR1 = [
+  { code:'A', label:'Knowing and understanding', strands:[
+    'Use vocabulary in context',
+    'Demonstrate knowledge and understanding of subject-specific content and concepts, using descriptions, explanations and examples'
+  ]},
+  { code:'B', label:'Investigating', strands:[
+    'Explain the choice of a research question',
+    'Follow an action plan to explore a research question',
+    'Collect and record relevant information consistent with the research question',
+    'Reflect on the process and results of the investigation'
+  ]},
+  { code:'C', label:'Communicating', strands:[
+    'Communicate information and ideas with clarity',
+    'Organize information and ideas effectively for the task',
+    'List sources of information in a way that follows the task instructions'
+  ]},
+  { code:'D', label:'Thinking critically', strands:[
+    'Identify the main points of ideas, events, visual representation or arguments',
+    'Use information to justify an opinion',
+    'Identify and analyse a range of sources/data in terms of origin and purpose',
+    'Identify different views and their implications'
+  ]}
+];
+const IS_CRITERIA_YEAR3 = [
+  { code:'A', label:'Knowing and understanding', strands:[
+    'Use a range of terminology in context',
+    'Demonstrate knowledge and understanding of subject-specific content and concepts, through descriptions, explanations and examples'
+  ]},
+  { code:'B', label:'Investigating', strands:[
+    'Formulate/choose a clear and focused research question, explaining its relevance',
+    'Formulate and follow an action plan to investigate a research question',
+    'Use methods to collect and record relevant information',
+    'Evaluate the process and results of the investigation, with guidance'
+  ]},
+  { code:'C', label:'Communicating', strands:[
+    'Communicate information and ideas in a way that is appropriate for the audience and purpose',
+    'Structure information and ideas according to the task instructions',
+    'Create a reference list and cite sources of information'
+  ]},
+  { code:'D', label:'Thinking critically', strands:[
+    'Analyse concepts, issues, models, visual representation and/or theories',
+    'Summarize information to make valid, well-supported arguments',
+    'Analyse a range of sources/data in terms of origin and purpose, recognizing value and limitations',
+    'Recognize different perspectives and explain their implications'
+  ]}
+];
+const IS_CRITERIA_YEAR5 = [
+  { code:'A', label:'Knowing and understanding', strands:[
+    'Use a wide range of terminology in context',
+    'Demonstrate knowledge and understanding of subject-specific content and concepts through developed descriptions, explanations and examples'
+  ]},
+  { code:'B', label:'Investigating', strands:[
+    'Formulate a clear and focused research question and justify its relevance',
+    'Formulate and follow an action plan to investigate a research question',
+    'Use research methods to collect and record appropriate, varied and relevant information',
+    'Evaluate the process and results of the investigation'
+  ]},
+  { code:'C', label:'Communicating', strands:[
+    'Communicate information and ideas effectively using an appropriate style for the audience and purpose',
+    'Structure information and ideas in a way that is appropriate to the specified format',
+    'Document sources of information using a recognized convention'
+  ]},
+  { code:'D', label:'Thinking critically', strands:[
+    'Discuss concepts, issues, models, visual representation and theories',
+    'Synthesize information to make valid, well-supported arguments',
+    'Analyse and evaluate a range of sources/data in terms of origin and purpose, examining value and limitations',
+    'Interpret different perspectives and their implications'
+  ]}
+];
+const IS_MYP_YEARS = ['Year 1 (G6-7)', 'Year 3 (G8-9)', 'Year 5 (G10)'];
+const IS_WRITING_TYPES = [
+  'Argumentative Essay', 'Compare and Contrast', 'OPCVL Analysis Paper',
+  'Proposal', 'Reflective Writing', 'Research Justification'
+];
+function isISAssessment(assessment){
+  return !!(assessment && assessment.subject === 'Individuals and Societies MYP' && assessment.subjectMeta && assessment.subjectMeta.mypYear);
+}
+function isCriteriaForMypYear(mypYear){
+  if(mypYear === 'Year 1 (G6-7)') return IS_CRITERIA_YEAR1;
+  if(mypYear === 'Year 3 (G8-9)') return IS_CRITERIA_YEAR3;
+  return IS_CRITERIA_YEAR5;
+}
+// Subject-agnostic check used everywhere the wizard/report/scoring UI needs to know whether an
+// assessment carries the Criteria + Strand structure (Eng Lit DP and I&S MYP today, any future
+// subject built the same way tomorrow) rather than the plain skill-taxonomy flow every other
+// subject uses.
+function hasCriteriaFlow(assessment){
+  return !!(assessment && assessment.subjectMeta && Array.isArray(assessment.subjectMeta.criteria) && assessment.subjectMeta.criteria.length);
+}
+// Builds the "<Paper 2 · HL>" / "<Year 5>" suffix shown next to the subject name. Empty string
+// for subjects with no extra meta (which callers treat as "no suffix to show").
+function writingAssessmentMetaLabel(assessment){
+  if(isLitAssessment(assessment)){
+    return `${assessment.subjectMeta.paper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(assessment.subjectMeta.level||'')}`;
+  }
+  if(isISAssessment(assessment)){
+    return escapeHtml(assessment.subjectMeta.mypYear||'');
+  }
+  return '';
+}
 function writingNegSkillsForAssessment(assessment){
   if(isLitAssessment(assessment)){
     return litModulesForPaper(assessment.subjectMeta.paper).map(m=>({ key:m.key, label:m.label, description:m.negative }));
@@ -465,7 +570,7 @@ function writingPosSkillsForAssessment(assessment){
 // the max-if-fully-scored, plus whether every selected criterion has a score yet (so the UI can
 // flag an incomplete grade rather than silently showing a partial number as final).
 function computeWritingCriteriaTotal(assessment, feedback){
-  if(!isLitAssessment(assessment)) return null;
+  if(!hasCriteriaFlow(assessment)) return null;
   const criteria = assessment.subjectMeta.criteria.filter(c=>c.selected);
   const scores = (feedback && feedback.scores && feedback.scores.criteria) || {};
   let total = 0, max = 0, complete = true;
@@ -2414,7 +2519,7 @@ async function computeClassWritingAggregate(classId, assessmentId){
 
 /* ============ WRITING ASSESSMENT: rendering ============ */
 function writingReportContentHtml(assessment, student, feedback, tally){
-  if(isLitAssessment(assessment)) return writingLitReportContentHtml(assessment, student, feedback, tally);
+  if(hasCriteriaFlow(assessment)) return writingCriteriaReportContentHtml(assessment, student, feedback, tally);
   const renderBucket = (bucket, polarity) => {
     const keys = Object.keys(bucket);
     if(keys.length===0) return '<div class="muted">None logged.</div>';
@@ -2457,7 +2562,7 @@ function writingReportContentHtml(assessment, student, feedback, tally){
 // worth it": it shows the student WHY they got e.g. 2/5 instead of 3/5 on a given Criterion.
 // Any tap that wasn't tagged to a Criterion still appears, in an "Untagged Feedback" section,
 // so nothing logged is ever silently dropped from the report.
-function writingLitReportContentHtml(assessment, student, feedback, tally){
+function writingCriteriaReportContentHtml(assessment, student, feedback, tally){
   const criteria = assessment.subjectMeta.criteria;
   const total = computeWritingCriteriaTotal(assessment, feedback);
   const taggedEventIds = new Set();
@@ -2494,7 +2599,7 @@ function writingLitReportContentHtml(assessment, student, feedback, tally){
   return `
     <h3>${escapeHtml(assessment.title)}</h3>
     <div class="muted" style="margin-bottom:4px;">${escapeHtml(student.name)} &middot; Due ${formatDateNice(assessment.dueDate)}</div>
-    <div class="muted" style="margin-bottom:10px;">Eng Lit DP &middot; ${assessment.subjectMeta.paper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(assessment.subjectMeta.level||'')}</div>
+    <div class="muted" style="margin-bottom:10px;">${escapeHtml(assessment.subject)}${writingAssessmentMetaLabel(assessment) ? ` &middot; ${writingAssessmentMetaLabel(assessment)}` : ''}</div>
     ${assessment.prompt ? `<div class="card" style="margin-bottom:14px;"><em>${escapeHtml(assessment.prompt)}</em></div>` : ''}
     <div style="margin-bottom:10px;"><strong>Total: ${total.total} / ${total.max}</strong>${total.complete?'':' <span class="muted">(not all criteria scored yet)</span>'}</div>
     ${criteriaBlocksHtml}
@@ -2672,7 +2777,7 @@ async function renderWritingAssessmentList(){
           <span class="tag neutral">${a.type==='summative'?'Summative':'Formative'}</span>
         </div>
         <div class="muted" style="margin-top:4px;">
-          ${a.subject ? `${escapeHtml(a.subject)}${isLitAssessment(a) ? ` &middot; ${a.subjectMeta.paper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(a.subjectMeta.level||'')}` : ''} &middot; ` : ''}Due ${formatDateNice(a.dueDate)} &middot; ${submitted}/${students.length} complete (${pct}%)
+          ${a.subject ? `${escapeHtml(a.subject)}${writingAssessmentMetaLabel(a) ? ` &middot; ${writingAssessmentMetaLabel(a)}` : ''} &middot; ` : ''}Due ${formatDateNice(a.dueDate)} &middot; ${submitted}/${students.length} complete (${pct}%)
         </div>
       </div>`);
   }
@@ -2720,7 +2825,7 @@ async function renderWritingAssessmentDetail(assessmentId){
     </div>
     <h3>${escapeHtml(assessment.title)}</h3>
     <div class="muted" style="margin-bottom:14px;">
-      ${assessment.subject ? `${escapeHtml(assessment.subject)}${isLitAssessment(assessment) ? ` &middot; ${assessment.subjectMeta.paper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(assessment.subjectMeta.level||'')}` : ''} &middot; ` : ''}${assessment.type==='summative'?'Summative':'Formative'} &middot; ${assessment.mode==='in_class_timed'?'In-Class Timed':'Take Home'} &middot; Due ${formatDateNice(assessment.dueDate)} &middot; ${submittedCount}/${students.length} complete (${pct}%)
+      ${assessment.subject ? `${escapeHtml(assessment.subject)}${writingAssessmentMetaLabel(assessment) ? ` &middot; ${writingAssessmentMetaLabel(assessment)}` : ''} &middot; ` : ''}${assessment.type==='summative'?'Summative':'Formative'} &middot; ${assessment.mode==='in_class_timed'?'In-Class Timed':'Take Home'} &middot; Due ${formatDateNice(assessment.dueDate)} &middot; ${submittedCount}/${students.length} complete (${pct}%)
     </div>
     ${rows.join('')}
   `;
@@ -2754,17 +2859,18 @@ async function renderWritingStudentPage(assessmentId, studentId){
     return `${backBtn}<div class="card" style="margin-top:10px;">${writingReportContentHtml(assessment, student, feedback, tally)}</div>${actionsHtml}`;
   }
 
-  const isLit = isLitAssessment(assessment);
+  const hasCriteria = hasCriteriaFlow(assessment);
   const negSkills = writingNegSkillsForAssessment(assessment);
   const posSkills = writingPosSkillsForAssessment(assessment);
   const skillButtonHtml = (skill, polarity) => {
     const bucket = polarity==='negative' ? tally.neg : tally.pos;
     const t = bucket[skill.key];
     const count = t ? t.count : 0;
-    // For Lit assessments, tapping a feedback module opens a modal (quote + which Criteria
-    // this tap applies to) instead of the plain quote-only prompt used by every other subject.
+    // For Criteria assessments (Eng Lit DP, I&S MYP), tapping a feedback module opens a modal
+    // (quote + which Criteria this tap applies to) instead of the plain quote-only prompt used
+    // by every other subject.
     return `
-      <div class="cat-btn" style="cursor:pointer;" data-wa-skill="${skill.key}" data-wa-polarity="${polarity}" ${isLit?'data-wa-lit-tag="1"':''}>
+      <div class="cat-btn" style="cursor:pointer;" data-wa-skill="${skill.key}" data-wa-polarity="${polarity}" ${hasCriteria?'data-wa-criteria-tag="1"':''}>
         <div style="display:flex; align-items:center; justify-content:space-between;">
           <span>${escapeHtml(skill.label)}</span>
           <span class="row" style="gap:8px;">
@@ -2777,7 +2883,7 @@ async function renderWritingStudentPage(assessmentId, studentId){
   };
 
   const scoreSectionsHtml = [];
-  if(isLit){
+  if(hasCriteria){
     const total = computeWritingCriteriaTotal(assessment, feedback);
     assessment.subjectMeta.criteria.forEach(c=>{
       const current = feedback.scores.criteria ? feedback.scores.criteria[c.code] : null;
@@ -2840,15 +2946,16 @@ async function renderWritingStudentPage(assessmentId, studentId){
 /* ============ WRITING ASSESSMENT: wizard ============ */
 async function openWritingAssessmentWizard(){
   const draft = {
-    subject: null, litPaper: null, litLevel: null,
+    subject: null, litPaper: null, litLevel: null, mypYear: null,
     title:'', type:'formative', mode:'in_class_timed', dueDate: todayStr(),
     writingType: WRITING_TYPES[0], writingTypeOther:'', litWritingTypeText:'', methods:[], prompt:'', promptNA:false,
-    criteria: null // lazily built from LIT_CRITERIA_PAPER1/2 once paper is known
+    criteria: null // lazily built from LIT_CRITERIA_PAPER1/2 or IS_CRITERIA_YEARx once known
   };
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.id = 'wa-wizard-backdrop';
   const isLit = ()=> draft.subject === 'Eng Lit DP';
+  const isIS = ()=> draft.subject === 'Individuals and Societies MYP';
 
   function syncFormValues(){
     const titleEl = backdrop.querySelector('#wa-title'); if(titleEl) draft.title = titleEl.value;
@@ -2865,6 +2972,21 @@ async function openWritingAssessmentWizard(){
         strands: c.strands.map(text=>({ text, selected:true, taskDescription:'', descOpen:false }))
       }));
     }
+  }
+  function ensureISCriteria(){
+    if(!draft.criteria){
+      draft.criteria = isCriteriaForMypYear(draft.mypYear).map(c=>({
+        code:c.code, label:c.label, groupLabel:null, selected:true,
+        strands: c.strands.map(text=>({ text, selected:true, taskDescription:'', descOpen:false }))
+      }));
+    }
+  }
+  // Dispatches to whichever Criteria-flow subject is active. Any future criteria-based subject
+  // just needs a branch here plus its own render*Step -- the shared Criteria/Strand steps below
+  // (renderCriteriaStep/renderStrandsStep) already operate generically on draft.criteria.
+  function ensureCriteria(){
+    if(isLit()) ensureLitCriteria();
+    else if(isIS()) ensureISCriteria();
   }
 
   /* ---- Step 0: Subject ---- */
@@ -2891,7 +3013,45 @@ async function openWritingAssessmentWizard(){
     });
     backdrop.querySelector('#wa-subject-next-btn').addEventListener('click', ()=>{
       if(!draft.subject){ toast('Please choose a subject'); return; }
-      if(isLit()) renderLitPaperLevelStep(); else renderForm();
+      if(isLit()) renderLitPaperLevelStep();
+      else if(isIS()) renderISYearStep();
+      else renderForm();
+    });
+  }
+
+  /* ---- Step 0b (I&S MYP only): MYP Year band (decides strand wording) ---- */
+  function renderISYearStep(){
+    backdrop.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Individuals and Societies MYP</h3>
+          <button class="icon-btn" id="close-wa-wizard">&times;</button>
+        </div>
+        <div class="field">
+          <label>MYP Year</label>
+          <div>${IS_MYP_YEARS.map(y=>`<span class="chip ${draft.mypYear===y?'selected':''}" data-wa-is-year="${escapeHtml(y)}">${escapeHtml(y)}</span>`).join('')}</div>
+          <div class="muted" style="margin-top:6px;">Sets the official IB strand wording for the criteria step.</div>
+        </div>
+        <div class="row" style="margin-top:14px;">
+          <button class="btn ghost" id="wa-is-back-btn">&larr; Back</button>
+          <button class="btn primary" id="wa-is-next-btn">Next</button>
+        </div>
+      </div>
+    `;
+    backdrop.querySelector('#close-wa-wizard').addEventListener('click', ()=>backdrop.remove());
+    backdrop.querySelectorAll('[data-wa-is-year]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const y = el.getAttribute('data-wa-is-year');
+        if(draft.mypYear !== y) draft.criteria = null; // year changed -- rebuild criteria list when we get there
+        draft.mypYear = y;
+        renderISYearStep();
+      });
+    });
+    backdrop.querySelector('#wa-is-back-btn').addEventListener('click', ()=> renderSubjectStep());
+    backdrop.querySelector('#wa-is-next-btn').addEventListener('click', ()=>{
+      if(!draft.mypYear){ toast('Please choose a MYP Year'); return; }
+      if(!IS_WRITING_TYPES.includes(draft.writingType)) draft.writingType = IS_WRITING_TYPES[0];
+      renderForm();
     });
   }
 
@@ -2953,7 +3113,7 @@ async function openWritingAssessmentWizard(){
           <h3>Add Writing Assessment</h3>
           <button class="icon-btn" id="close-wa-wizard">&times;</button>
         </div>
-        <div class="muted" style="margin-bottom:10px;">${escapeHtml(draft.subject)}${isLit() ? ` &middot; ${draft.litPaper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(draft.litLevel)}` : ''}</div>
+        <div class="muted" style="margin-bottom:10px;">${escapeHtml(draft.subject)}${isLit() ? ` &middot; ${draft.litPaper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(draft.litLevel)}` : ''}${isIS() ? ` &middot; ${escapeHtml(draft.mypYear)}` : ''}</div>
         <div class="field">
           <label>Title</label>
           <input type="text" id="wa-title" placeholder="e.g. Unseen Poetry Analysis" value="${escapeHtml(draft.title)}">
@@ -2980,6 +3140,10 @@ async function openWritingAssessmentWizard(){
         <div class="field">
           <label>Writing Type</label>
           <input type="text" id="wa-lit-writing-type" placeholder="Describe the writing type" value="${escapeHtml(draft.litWritingTypeText)}">
+        </div>` : isIS() ? `
+        <div class="field">
+          <label>Writing Type</label>
+          <div>${IS_WRITING_TYPES.map(t=>`<span class="chip ${draft.writingType===t?'selected':''}" data-wa-field="writingType" data-wa-val="${escapeHtml(t)}">${escapeHtml(t)}</span>`).join('')}</div>
         </div>` : `
         <div class="field">
           <label>Writing Type</label>
@@ -2991,8 +3155,8 @@ async function openWritingAssessmentWizard(){
           <div>${WRITING_ASSESSMENT_METHODS.map(m=>`<span class="chip ${draft.methods.includes(m.key)?'selected':''}" data-wa-method="${m.key}">${escapeHtml(m.label)}</span>`).join('')}</div>
         </div>`}
         <div class="field">
-          <label>${isLit() ? 'Describe the Task' : 'Essay Prompt / Question'}</label>
-          <textarea id="wa-prompt" placeholder="${isLit() ? 'Describe the task in a clear and relevant way...' : 'Paste or type the prompt...'}" ${draft.promptNA?'disabled':''}>${draft.promptNA ? '' : escapeHtml(draft.prompt)}</textarea>
+          <label>${(isLit()||isIS()) ? 'Describe the Task' : 'Essay Prompt / Question'}</label>
+          <textarea id="wa-prompt" placeholder="${(isLit()||isIS()) ? 'Describe the task in a clear and relevant way...' : 'Paste or type the prompt...'}" ${draft.promptNA?'disabled':''}>${draft.promptNA ? '' : escapeHtml(draft.prompt)}</textarea>
           <div style="margin-top:6px;"><span class="chip ${draft.promptNA?'selected':''}" id="wa-prompt-na">Not Applicable</span></div>
         </div>
         <div class="row" style="margin-top:14px;">
@@ -3026,14 +3190,16 @@ async function openWritingAssessmentWizard(){
     });
     backdrop.querySelector('#wa-form-back-btn').addEventListener('click', ()=>{
       syncFormValues();
-      if(isLit()) renderLitPaperLevelStep(); else renderSubjectStep();
+      if(isLit()) renderLitPaperLevelStep();
+      else if(isIS()) renderISYearStep();
+      else renderSubjectStep();
     });
     backdrop.querySelector('#wa-to-preview-btn').addEventListener('click', ()=>{
       syncFormValues();
       if(!draft.title.trim()){ toast('Please enter a title'); return; }
       if(isLit()){
         if(!draft.litWritingTypeText.trim()){ toast('Please describe the writing type'); return; }
-      } else if(draft.writingType==='Other' && !draft.writingTypeOther.trim()){
+      } else if(!isIS() && draft.writingType==='Other' && !draft.writingTypeOther.trim()){
         toast('Please describe the writing type'); return;
       }
       renderPreview();
@@ -3053,16 +3219,16 @@ async function openWritingAssessmentWizard(){
           <button class="icon-btn" id="close-wa-wizard2">&times;</button>
         </div>
         <div class="card">
-          <div class="muted">${escapeHtml(draft.subject)}${isLit() ? ` &middot; ${draft.litPaper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(draft.litLevel)}` : ''}</div>
+          <div class="muted">${escapeHtml(draft.subject)}${isLit() ? ` &middot; ${draft.litPaper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(draft.litLevel)}` : ''}${isIS() ? ` &middot; ${escapeHtml(draft.mypYear)}` : ''}</div>
           <div style="margin-top:4px;"><strong>${escapeHtml(draft.title)}</strong></div>
           <div class="muted" style="margin-top:4px;">${draft.type==='summative'?'Summative':'Formative'} &middot; ${draft.mode==='in_class_timed'?'In-Class Timed':'Take Home'} &middot; Due ${formatDateNice(draft.dueDate)}</div>
           <div style="margin-top:8px;"><strong>Writing Type:</strong> ${escapeHtml(finalWritingType)}</div>
-          ${isLit() ? '' : `<div style="margin-top:8px;"><strong>Assessed via:</strong> ${escapeHtml(methodsLabel)}</div>`}
-          <div style="margin-top:8px;"><strong>${isLit()?'Task Prompt':'Prompt'}:</strong> ${draft.promptNA ? 'Not Applicable' : (draft.prompt.trim() ? escapeHtml(draft.prompt) : '<span class="muted">(none entered)</span>')}</div>
+          ${(isLit()||isIS()) ? '' : `<div style="margin-top:8px;"><strong>Assessed via:</strong> ${escapeHtml(methodsLabel)}</div>`}
+          <div style="margin-top:8px;"><strong>${(isLit()||isIS())?'Task Prompt':'Prompt'}:</strong> ${draft.promptNA ? 'Not Applicable' : (draft.prompt.trim() ? escapeHtml(draft.prompt) : '<span class="muted">(none entered)</span>')}</div>
         </div>
         <div class="row" style="margin-top:14px;">
           <button class="btn ghost" id="wa-back-to-form-btn">&larr; Edit</button>
-          ${isLit()
+          ${(isLit()||isIS())
             ? `<button class="btn primary" id="wa-to-criteria-btn">Submit and Select Criteria / Strands</button>`
             : `<button class="btn primary" id="wa-confirm-btn">Confirm</button>`}
         </div>
@@ -3076,7 +3242,7 @@ async function openWritingAssessmentWizard(){
         id: uuid(), classId: state.currentClassId, title: draft.title.trim(),
         type: draft.type, mode: draft.mode, dueDate: draft.dueDate,
         subject: draft.subject,
-        writingType: finalWritingType, methods: isLit() ? [] : draft.methods.slice(),
+        writingType: finalWritingType, methods: (isLit()||isIS()) ? [] : draft.methods.slice(),
         prompt: draft.promptNA ? null : (draft.prompt.trim() || null),
         createdAt: Date.now(), subjectMeta: null
       };
@@ -3096,7 +3262,7 @@ async function openWritingAssessmentWizard(){
     const criteriaBtn = backdrop.querySelector('#wa-to-criteria-btn');
     if(criteriaBtn) criteriaBtn.addEventListener('click', ()=>{
       draft.pendingAssessment = buildBaseAssessment();
-      ensureLitCriteria();
+      ensureCriteria();
       renderCriteriaStep();
     });
   }
@@ -3153,7 +3319,13 @@ async function openWritingAssessmentWizard(){
     });
     backdrop.querySelector('#wa-criteria-back-btn').addEventListener('click', ()=> renderPreview());
     backdrop.querySelector('#wa-criteria-next-btn').addEventListener('click', ()=>{
-      if(!draft.criteria.some(c=>c.selected)){ toast('Please select at least one criterion'); return; }
+      const selected = draft.criteria.filter(c=>c.selected);
+      if(!selected.length){ toast('Please select at least one criterion'); return; }
+      // IB guidance (not a hard rule here): for summative I&S tasks, Criterion B should be
+      // combined with at least one other criterion -- warn but let the teacher proceed anyway.
+      if(isIS() && draft.type==='summative' && selected.length===1 && selected[0].code==='B'){
+        toast('IB guidance: combine Criterion B with another criterion for summative tasks');
+      }
       renderStrandsStep();
     });
   }
@@ -3217,15 +3389,19 @@ async function openWritingAssessmentWizard(){
     });
     backdrop.querySelector('#wa-strands-back-btn').addEventListener('click', ()=> renderCriteriaStep());
     backdrop.querySelector('#wa-strands-save-btn').addEventListener('click', async ()=>{
-      const maxScore = litCriterionMaxScore(draft.litPaper, draft.litLevel);
+      // I&S criteria are a flat Maximum: 8 in every year band -- no HL/SL-style doubling like
+      // Eng Lit DP Paper 1 HL.
+      const maxScore = isLit() ? litCriterionMaxScore(draft.litPaper, draft.litLevel) : 8;
       const assessment = draft.pendingAssessment;
-      assessment.subjectMeta = {
-        paper: draft.litPaper, level: draft.litLevel,
+      const subjectMeta = {
         criteria: draft.criteria.filter(c=>c.selected).map(c=>({
           code:c.code, label:c.label, groupLabel:c.groupLabel||null, selected:true, maxScore,
           strands: c.strands.filter(s=>s.selected).map(s=>({ text:s.text, selected:true, taskDescription:(s.taskDescription||'').trim() }))
         }))
       };
+      if(isLit()){ subjectMeta.paper = draft.litPaper; subjectMeta.level = draft.litLevel; }
+      if(isIS()){ subjectMeta.mypYear = draft.mypYear; }
+      assessment.subjectMeta = subjectMeta;
       await dbAdd('writingAssessments', assessment);
       backdrop.remove();
       state.writingSelectedAssessmentId = assessment.id;
@@ -3275,11 +3451,11 @@ async function openManageWritingEntriesModal(polarity, skillKey){
   });
 }
 
-// For Eng Lit DP taps: instead of the plain quote-only prompt every other subject uses, this
-// modal also lets the teacher multi-select which of the assessment's chosen Criteria the tap
-// applies to -- that tagging is what lets the report later auto-attribute feedback to the
-// Criterion that explains the score the student received.
-async function openLitTapModal(assessment, polarity, skillKey){
+// For Criteria assessments (Eng Lit DP, I&S MYP): instead of the plain quote-only prompt every
+// other subject uses, this modal also lets the teacher multi-select which of the assessment's
+// chosen Criteria the tap applies to -- that tagging is what lets the report later auto-attribute
+// feedback to the Criterion that explains the score the student received.
+async function openCriteriaTapModal(assessment, polarity, skillKey){
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.id = 'wa-lit-tap-modal-backdrop';
@@ -3417,9 +3593,9 @@ function wireWritingTabEvents(){
       if(ev.target.closest('[data-wa-manage]')) return;
       const skillKey = el.getAttribute('data-wa-skill');
       const polarity = el.getAttribute('data-wa-polarity');
-      if(el.getAttribute('data-wa-lit-tag')){
+      if(el.getAttribute('data-wa-criteria-tag')){
         const assessment = await dbGet('writingAssessments', state.writingSelectedAssessmentId);
-        await openLitTapModal(assessment, polarity, skillKey);
+        await openCriteriaTapModal(assessment, polarity, skillKey);
         return;
       }
       const quote = window.prompt('Quote the specific word, phrase, or sentence (optional) — Cancel to skip:');
