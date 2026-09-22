@@ -311,7 +311,16 @@ const WRITING_SKILLS_NEGATIVE = [
   { key:'descriptive_not_analytical', label:'Descriptive Not Analytical', description:'The writing summarizes or describes rather than analyzing why or how it matters.', dpOnly:true },
   { key:'weak_quote_integration', label:'Weak Quote Integration', description:'Quotes are dropped in without being introduced or explained.', dpOnly:true },
   { key:'missing_key_context', label:'Missing Key Context', description:'Necessary background or contextual information is left out.', dpOnly:true },
-  { key:'irrelevant_context', label:'Irrelevant Context or Arguments', description:"Included context or arguments don't actually support the essay's point.", dpOnly:true }
+  { key:'irrelevant_context', label:'Irrelevant Context or Arguments', description:"Included context or arguments don't actually support the essay's point.", dpOnly:true },
+  { key:'poor_topic_comprehension', label:'Poor Topic or Reading Comprehension', description:'Shows a limited or inaccurate understanding of the topic, text, or source material.' },
+  { key:'informal_language', label:'Informal Language', description:'Uses casual or conversational language that is not appropriate for the task.' },
+  { key:'irrelevant_topic_context', label:'Irrelevant Context', description:"Includes context that doesn't actually relate to or support the point being made." },
+  { key:'inconsistent_argument', label:'Inconsistent Argument', description:'The argument shifts or contradicts itself across the piece.' },
+  { key:'no_analysis', label:'No Analysis', description:'States evidence without explaining its significance or meaning.' },
+  { key:'weak_analysis', label:'Weak Analysis', description:'Explains evidence only briefly or at a surface level.' },
+  { key:'grammar_issue', label:'Grammar Issue', description:'Grammar errors interfere with clarity or correctness.' },
+  { key:'no_quotes_included', label:'No Quotes Included', description:'Does not include quotes to support the points being made.' },
+  { key:'no_evidence', label:'No Evidence', description:'Claims are not supported by any evidence.' }
 ];
 const WRITING_SKILLS_POSITIVE = [
   { key:'clear_thesis', label:'Clear Thesis', description:'States a specific, well-defined central argument.' },
@@ -328,7 +337,15 @@ const WRITING_SKILLS_POSITIVE = [
   { key:'strong_analysis', label:'Strong Analysis', description:'Goes beyond description to explain significance and meaning.', dpOnly:true },
   { key:'strong_quote_integration', label:'Strong Quote Integration', description:'Quotes are introduced, embedded, and explained smoothly.', dpOnly:true },
   { key:'relevant_outside_context', label:'Includes Relevant Outside Context', description:'Brings in background or context that directly supports the argument.', dpOnly:true },
-  { key:'nuanced_reasoning', label:'Nuanced Reasoning', description:'Considers complexity and multiple angles rather than oversimplifying.', dpOnly:true }
+  { key:'nuanced_reasoning', label:'Nuanced Reasoning', description:'Considers complexity and multiple angles rather than oversimplifying.', dpOnly:true },
+  { key:'good_topic_comprehension', label:'Good Topic or Reading Comprehension', description:'Shows a solid understanding of the topic, text, or source material.' },
+  { key:'strong_reading_comprehension', label:'Strong Reading Comprehension', description:'Demonstrates a clear, accurate understanding of what was read.' },
+  { key:'relevant_topic_context', label:'Relevant Topic or Reading Context', description:'Uses context from the topic or reading that directly supports the point being made.' },
+  { key:'uses_relevant_quotes', label:'Uses Relevant Quotes', description:'Selects quotes that directly support the point being made.' },
+  { key:'uses_relevant_expert_quotes', label:'Uses Relevant Expert Quotes', description:'Selects quotes from experts or authoritative sources that directly support the point being made.' },
+  { key:'good_analysis', label:'Good Analysis', description:'Explains the significance of evidence rather than just stating it.' },
+  { key:'deep_analysis', label:'Deep Analysis', description:'Goes beyond a surface explanation to explore deeper meaning or implications.' },
+  { key:'consistent_argument', label:'Argument is Consistent', description:'The argument stays the same and does not contradict itself across the piece.' }
 ];
 function writingSkillsForAssessment(assessment, list){
   const includeDp = assessment && assessment.methods && assessment.methods.includes('dp_scale');
@@ -2418,6 +2435,166 @@ async function deleteWritingAssessmentCascade(assessmentId){
   for(const f of feedback) await dbDelete('writingFeedback', f.id);
   await dbDelete('writingAssessments', assessmentId);
 }
+
+/* ============ WRITING ASSESSMENT: export/import to Directory (cross-class continuity) ============ */
+// A "student" record's own id is per-class-enrollment and never stable across a rotation/semester
+// change -- if Abby Gu moves from one teacher's class to another, she gets a brand-new student.id
+// in the new roster. The `directoryId` every "Add from Directory" student carries (pointing at the
+// same shared `directory` record) is the only identity that IS stable across that move, so it's
+// the match key this whole feature is built on. Students added manually (no directoryId) can't
+// participate -- there's no reliable way to match them across classes.
+async function buildWritingDataExportBundle(classId){
+  const cls = await dbGet('classes', classId);
+  const students = (await dbGetAllByIndex('students','classId', classId)).filter(s=>s.active!==false && s.directoryId);
+  const assessmentsById = {};
+  const studentBundles = [];
+  for(const s of students){
+    const events = (await dbGetAllByIndex('writingEvents','studentId', s.id)).filter(e=>e.classId===classId);
+    const feedbackAll = (await dbGetAllByIndex('writingFeedback','studentId', s.id)).filter(f=>f.classId===classId);
+    const hasFeedbackContent = (f)=> !!(f.comment && f.comment.trim()) || !!(f.scores && (f.scores.dp!=null || f.scores.myp!=null || f.scores.level!=null || (f.scores.criteria && Object.values(f.scores.criteria).some(v=>v!=null))));
+    const feedback = feedbackAll.filter(hasFeedbackContent);
+    if(!events.length && !feedback.length) continue; // nothing logged for this student -- skip entirely
+    for(const record of [...events, ...feedback]){
+      if(!assessmentsById[record.assessmentId]){
+        const a = await dbGet('writingAssessments', record.assessmentId);
+        if(a) assessmentsById[a.id] = a;
+      }
+    }
+    const dirRec = await dbGet('directory', s.directoryId);
+    studentBundles.push({
+      directoryId: s.directoryId, name: s.name, cohort: dirRec ? dirRec.cohort : null,
+      events: events.map(e=>({ assessmentId:e.assessmentId, polarity:e.polarity, skillKey:e.skillKey, quote:e.quote||null, criteriaCodes:e.criteriaCodes, timestamp:e.timestamp })),
+      feedback: feedback.map(f=>({ assessmentId:f.assessmentId, comment:f.comment||'', scores:f.scores||{}, submittedAt:f.submittedAt||null, updatedAt:f.updatedAt||null }))
+    });
+  }
+  return {
+    type:'writing-data-export', version:1, exportedAt: Date.now(), sourceClassName: cls ? cls.name : '',
+    assessments: Object.values(assessmentsById).map(a=>({
+      id:a.id, title:a.title, type:a.type, mode:a.mode, dueDate:a.dueDate, subject:a.subject,
+      subjectMeta:a.subjectMeta||null, writingType:a.writingType||'', methods:a.methods||[], prompt:a.prompt||null, createdAt:a.createdAt
+    })),
+    students: studentBundles
+  };
+}
+async function exportWritingDataToDirectory(classId){
+  const bundle = await buildWritingDataExportBundle(classId);
+  if(!bundle.students.length){
+    toast('No writing data yet for students linked to the Directory');
+    return;
+  }
+  const filename = `${(bundle.sourceClassName||'class')}-writing-data-${todayStr()}.json`.replace(/[^\w.\-]+/g,'_');
+  const blob = new Blob([JSON.stringify(bundle, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url; link.download = filename;
+  document.body.appendChild(link); link.click(); link.remove();
+  URL.revokeObjectURL(url);
+  toast(`Exported writing data for ${bundle.students.length} student(s)`, 'good');
+}
+// Imports a previously-exported bundle into the CURRENT class, matching students by directoryId
+// against this class's roster (a student not yet added from Directory here is reported back as
+// unmatched -- add them from Directory first, then re-import). Assessments referenced by matched
+// students are cloned once per original id and tagged `importedFrom` so multiple students who
+// shared one assessment in their old class still share ONE clone here, and re-importing the same
+// file later reuses that clone (and skips re-adding events/feedback a student already has on it)
+// instead of duplicating everything.
+async function importWritingDataFromDirectory(classId, bundle){
+  if(!bundle || bundle.type !== 'writing-data-export' || !Array.isArray(bundle.students) || !Array.isArray(bundle.assessments)){
+    throw new Error('This file is not a recognized writing-data export.');
+  }
+  const roster = (await dbGetAllByIndex('students','classId', classId)).filter(s=>s.active!==false);
+  const byDirectoryId = {};
+  roster.forEach(s=>{ if(s.directoryId) byDirectoryId[s.directoryId] = s; });
+
+  const matched = bundle.students.filter(sb=> sb.directoryId && byDirectoryId[sb.directoryId]);
+  const unmatched = bundle.students.filter(sb=> !(sb.directoryId && byDirectoryId[sb.directoryId]));
+  if(!matched.length){
+    return { matchedCount:0, unmatchedNames: unmatched.map(s=>s.name), importedEvents:0, importedFeedback:0, assessmentsCreated:0 };
+  }
+
+  const referencedAssessmentIds = new Set();
+  matched.forEach(sb=>{
+    sb.events.forEach(e=>referencedAssessmentIds.add(e.assessmentId));
+    sb.feedback.forEach(f=>referencedAssessmentIds.add(f.assessmentId));
+  });
+
+  const existingInClass = await dbGetAllByIndex('writingAssessments','classId', classId);
+  const existingByImportedFrom = {};
+  existingInClass.forEach(a=>{ if(a.importedFrom) existingByImportedFrom[a.importedFrom] = a.id; });
+
+  const idMap = {};
+  const freshlyCreated = new Set();
+  let assessmentsCreated = 0;
+  for(const origId of referencedAssessmentIds){
+    if(existingByImportedFrom[origId]){ idMap[origId] = existingByImportedFrom[origId]; continue; }
+    const src = bundle.assessments.find(a=>a.id===origId);
+    if(!src) continue; // referenced assessment wasn't included in the file -- its events/feedback are skipped below
+    const clone = {
+      id: uuid(), classId, title: src.title, type: src.type, mode: src.mode, dueDate: src.dueDate,
+      subject: src.subject, subjectMeta: src.subjectMeta, writingType: src.writingType, methods: src.methods||[],
+      prompt: src.prompt, createdAt: Date.now(), importedFrom: origId, importedFromClassName: bundle.sourceClassName||null
+    };
+    await dbAdd('writingAssessments', clone);
+    idMap[origId] = clone.id;
+    freshlyCreated.add(clone.id);
+    assessmentsCreated++;
+  }
+
+  let importedEvents = 0, importedFeedback = 0;
+  for(const sb of matched){
+    const localStudent = byDirectoryId[sb.directoryId];
+    for(const newAssessmentId of new Set(Object.values(idMap))){
+      if(freshlyCreated.has(newAssessmentId)) continue; // can't have pre-existing data on a brand-new assessment
+      const already = (await dbGetAllByIndex('writingEvents','assessmentId', newAssessmentId)).some(e=>e.studentId===localStudent.id);
+      if(already) localStudent.__alreadyImported = localStudent.__alreadyImported || {};
+      if(already) localStudent.__alreadyImported[newAssessmentId] = true;
+    }
+    for(const e of sb.events){
+      const newAssessmentId = idMap[e.assessmentId];
+      if(!newAssessmentId) continue;
+      if(localStudent.__alreadyImported && localStudent.__alreadyImported[newAssessmentId]) continue;
+      await dbAdd('writingEvents', {
+        id: uuid(), assessmentId: newAssessmentId, classId, studentId: localStudent.id,
+        polarity: e.polarity, skillKey: e.skillKey, quote: e.quote||null,
+        criteriaCodes: e.criteriaCodes, timestamp: e.timestamp||Date.now()
+      });
+      importedEvents++;
+    }
+    for(const f of sb.feedback){
+      const newAssessmentId = idMap[f.assessmentId];
+      if(!newAssessmentId) continue;
+      if(localStudent.__alreadyImported && localStudent.__alreadyImported[newAssessmentId]) continue;
+      await dbAdd('writingFeedback', {
+        id: uuid(), assessmentId: newAssessmentId, classId, studentId: localStudent.id,
+        comment: f.comment||'', scores: f.scores||{dp:null,myp:null,level:null,criteria:{}},
+        submittedAt: f.submittedAt||null, updatedAt: f.updatedAt||Date.now()
+      });
+      importedFeedback++;
+    }
+  }
+
+  return { matchedCount: matched.length, unmatchedNames: unmatched.map(s=>s.name), importedEvents, importedFeedback, assessmentsCreated };
+}
+function openImportWritingDataSummaryModal(result){
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Import Writing Data</h3>
+        <button class="icon-btn" id="close-wa-import-summary">&times;</button>
+      </div>
+      <div class="card">
+        <div>${result.matchedCount} student(s) matched this class's roster and were imported.</div>
+        ${result.matchedCount ? `<div class="muted" style="margin-top:6px;">${result.assessmentsCreated} assessment(s) added, ${result.importedEvents} logged item(s), ${result.importedFeedback} feedback record(s).</div>` : ''}
+        ${result.unmatchedNames.length ? `<div style="margin-top:10px;"><strong>Not matched (add from Directory first, then re-import):</strong><ul style="margin:6px 0 0 18px;">${result.unmatchedNames.map(n=>`<li>${escapeHtml(n)}</li>`).join('')}</ul></div>` : ''}
+      </div>
+      <button class="btn primary block" id="close-wa-import-summary-btn" style="margin-top:14px;">Done</button>
+    </div>`;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#close-wa-import-summary').addEventListener('click', ()=>backdrop.remove());
+  backdrop.querySelector('#close-wa-import-summary-btn').addEventListener('click', ()=>backdrop.remove());
+}
 async function computeWritingStatus(assessmentId, studentId){
   const rec = await getWritingFeedbackRecord(assessmentId, studentId);
   if(rec && rec.submittedAt) return 'submitted';
@@ -2616,18 +2793,18 @@ function writingSubNavHtml(){
 }
 
 async function renderWritingTab(){
-  // NOTE: Data page (Stage 2) sub-nav is intentionally not wired into the UI yet.
-  // The aggregation + rendering functions below (renderWritingDataView, etc.) are
-  // built and ready, but paused per instruction while the subject/criteria/strand
-  // architecture (Eng Lit DP) is designed and built first. Re-enable by restoring
-  // the writingSubNavHtml() prefix + 'data' branch once that work resumes.
+  // Assessment detail/student drill-down pages don't show the Assessments/Data sub-nav (they're
+  // already a level deeper); the two top-level views (list, data) both get it.
   if(state.writingView==='detail' && state.writingSelectedAssessmentId){
     return await renderWritingAssessmentDetail(state.writingSelectedAssessmentId);
   }
   if(state.writingView==='student' && state.writingSelectedAssessmentId && state.writingSelectedStudentId){
     return await renderWritingStudentPage(state.writingSelectedAssessmentId, state.writingSelectedStudentId);
   }
-  return await renderWritingAssessmentList();
+  if(state.writingView==='data'){
+    return writingSubNavHtml() + await renderWritingDataView();
+  }
+  return writingSubNavHtml() + await renderWritingAssessmentList();
 }
 
 function writingAggregateSummaryHtml(agg, scopeLabel){
@@ -2691,8 +2868,8 @@ async function renderWritingStudentData(){
       </div>
       ${writingAggregateSummaryHtml(agg, 'This Assessment')}
       <div class="grid-cards" style="margin-top:14px;">
-        <div class="card"><canvas id="writing-student-pos-pie"></canvas></div>
-        <div class="card"><canvas id="writing-student-neg-pie"></canvas></div>
+        <div class="card"><canvas id="writing-student-pos-pie" style="max-height:260px;"></canvas></div>
+        <div class="card"><canvas id="writing-student-neg-pie" style="max-height:260px;"></canvas></div>
       </div>
     `;
   }
@@ -2706,10 +2883,10 @@ async function renderWritingStudentData(){
     ${selectHtml}
     ${writingAggregateSummaryHtml(agg, 'All Assessments')}
     <div class="grid-cards" style="margin-top:14px;">
-      <div class="card"><canvas id="writing-student-pos-pie"></canvas></div>
-      <div class="card"><canvas id="writing-student-neg-pie"></canvas></div>
+      <div class="card"><canvas id="writing-student-pos-pie" style="max-height:260px;"></canvas></div>
+      <div class="card"><canvas id="writing-student-neg-pie" style="max-height:260px;"></canvas></div>
     </div>
-    <div class="card" style="margin-top:14px;"><canvas id="writing-student-trend"></canvas></div>
+    <div class="card" style="margin-top:14px;"><canvas id="writing-student-trend" style="max-height:280px;"></canvas></div>
     <h4 style="margin-top:18px;">Individual Assessments</h4>
     ${assessmentListHtml}
   `;
@@ -2744,23 +2921,98 @@ async function renderWritingClassData(){
 
   const trendBlock = state.writingDataSelectedAssessmentId
     ? '' // a trend line needs more than one assessment to be meaningful
-    : `<div class="card" style="margin-top:14px;"><canvas id="writing-class-trend"></canvas></div>`;
+    : `<div class="card" style="margin-top:14px;"><canvas id="writing-class-trend" style="max-height:280px;"></canvas></div>`;
 
   return `
     ${scopeControlsHtml}
     ${assessmentPickerHtml}
     ${writingAggregateSummaryHtml(agg, state.writingDataSelectedAssessmentId ? 'This Assessment' : 'All Assessments')}
     ${trendBlock}
-    <div class="card" style="margin-top:14px;"><canvas id="writing-class-scatter"></canvas></div>
+    <div class="card" style="margin-top:14px;"><canvas id="writing-class-scatter" style="max-height:320px;"></canvas></div>
   `;
+}
+
+/* ============ WRITING ASSESSMENT: Data tab chart mounting ============ */
+// Basic version, applied the same way to every class for now (no per-subject/criteria-specific
+// charting yet -- that's a later pass once more subjects have their own criteria data, per Mike).
+// Chart.js (loaded via CDN in <head>) draws into <canvas> elements already in the live DOM by the
+// time this runs: render() sets innerHTML then calls wire*Events(), which calls this last. Every
+// render fully replaces the DOM, so canvases are always fresh elements -- no need to destroy old
+// Chart instances first. Re-derives the aggregate data itself (cheap local IndexedDB reads) rather
+// than threading it through from the render functions, consistent with this app's "always compute
+// live from the raw event log" design.
+const WRITING_PIE_PALETTE = ['#4a6fa5','#2e9e5b','#d64545','#e0a52e','#8e5fbf','#3fa7a1','#c76b9b','#7a8c3f'];
+function mountWritingPieChart(canvasId, ranked, title){
+  const canvas = document.getElementById(canvasId);
+  if(!canvas) return;
+  const top = ranked.slice(0,6);
+  if(!top.length) return; // nothing logged yet -- leave the canvas empty rather than draw a blank pie
+  new Chart(canvas, {
+    type:'pie',
+    data:{ labels: top.map(x=>x.label), datasets:[{ data: top.map(x=>x.count), backgroundColor: WRITING_PIE_PALETTE }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{position:'bottom', labels:{boxWidth:12, font:{size:11}}}, title:{display:true, text:title} } }
+  });
+}
+async function mountWritingCharts(){
+  if(typeof Chart === 'undefined') return; // CDN chart lib unavailable (offline, blocked, or a test harness)
+  if(state.writingDataView === 'class'){
+    const agg = await computeClassWritingAggregate(state.currentClassId, state.writingDataSelectedAssessmentId);
+    const trendCanvas = document.getElementById('writing-class-trend');
+    if(trendCanvas && agg.trend.length){
+      new Chart(trendCanvas, {
+        type:'line',
+        data:{ labels: agg.trend.map(t=>t.title), datasets:[
+          { label:'Avg Successes / Student', data: agg.trend.map(t=>t.avgPos), borderColor:'#2e9e5b', backgroundColor:'#2e9e5b', tension:0.25 },
+          { label:'Avg Challenges / Student', data: agg.trend.map(t=>t.avgNeg), borderColor:'#d64545', backgroundColor:'#d64545', tension:0.25 }
+        ]},
+        options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{position:'bottom'} }, scales:{ y:{ beginAtZero:true, ticks:{ stepSize:0.5 } } } }
+      });
+    }
+    const scatterCanvas = document.getElementById('writing-class-scatter');
+    if(scatterCanvas && agg.scatterPoints.length){
+      const hasDatalabels = typeof ChartDataLabels !== 'undefined';
+      new Chart(scatterCanvas, {
+        type:'scatter',
+        data:{ datasets:[{ label:'Students', data: agg.scatterPoints.map(p=>({x:p.posCount, y:p.negCount, label:p.firstName})), backgroundColor:'#4a6fa5' }] },
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{ display:false }, title:{display:true, text:'Successes vs. Challenges per Student'}, datalabels: hasDatalabels ? { align:'top', formatter:(v)=>v.label, font:{size:10} } : false },
+          scales:{ x:{ title:{display:true, text:'Writing Successes logged'}, beginAtZero:true }, y:{ title:{display:true, text:'Writing Challenges logged'}, beginAtZero:true } }
+        },
+        plugins: hasDatalabels ? [ChartDataLabels] : []
+      });
+    }
+  } else {
+    const agg = await computeStudentWritingAggregate(state.currentClassId, state.writingDataSelectedStudentId, state.writingDataSelectedAssessmentId);
+    mountWritingPieChart('writing-student-pos-pie', agg.positiveRanked, 'Writing Successes');
+    mountWritingPieChart('writing-student-neg-pie', agg.negativeRanked, 'Writing Challenges');
+    const trendCanvas = document.getElementById('writing-student-trend');
+    if(trendCanvas && agg.trend.length){
+      new Chart(trendCanvas, {
+        type:'line',
+        data:{ labels: agg.trend.map(t=>t.title), datasets:[
+          { label:'Successes', data: agg.trend.map(t=>t.posCount), borderColor:'#2e9e5b', backgroundColor:'#2e9e5b', tension:0.25 },
+          { label:'Challenges', data: agg.trend.map(t=>t.negCount), borderColor:'#d64545', backgroundColor:'#d64545', tension:0.25 }
+        ]},
+        options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{position:'bottom'} }, scales:{ y:{ beginAtZero:true } } }
+      });
+    }
+  }
 }
 
 async function renderWritingAssessmentList(){
   const assessments = (await dbGetAllByIndex('writingAssessments','classId', state.currentClassId))
     .sort((a,b)=> b.createdAt - a.createdAt);
   const addBtn = `<button class="btn primary" id="add-writing-assessment-btn">+ Add Writing Assessment</button>`;
+  // Export/Import carry a student's writing history across a class/rotation change, matched by
+  // Directory identity -- available even on an empty assessment list since Import is often the
+  // very first thing a teacher does in a brand-new class.
+  const directoryToolsHtml = `
+    <button class="btn small ghost" id="export-writing-directory-btn">Export Writing Data</button>
+    <button class="btn small ghost" id="import-writing-directory-btn">Import Writing Data</button>
+    <input type="file" id="writing-directory-file-input" accept=".json" style="display:none;">`;
   if(assessments.length===0){
-    return `<div class="empty">No writing assessments yet for this class.</div><div class="row" style="margin-top:12px;">${addBtn}</div>`;
+    return `<div class="empty">No writing assessments yet for this class.</div><div class="row" style="margin-top:12px;">${addBtn}${directoryToolsHtml}</div>`;
   }
   const students = (await dbGetAllByIndex('students','classId', state.currentClassId)).filter(s=>s.active!==false);
   const cardsHtml = [];
@@ -2781,7 +3033,7 @@ async function renderWritingAssessmentList(){
         </div>
       </div>`);
   }
-  return `<div class="row" style="margin-bottom:14px;">${addBtn}</div><div class="grid-cards">${cardsHtml.join('')}</div>`;
+  return `<div class="row wrap" style="margin-bottom:14px;">${addBtn}${directoryToolsHtml}</div><div class="grid-cards">${cardsHtml.join('')}</div>`;
 }
 
 async function renderWritingAssessmentDetail(assessmentId){
@@ -2946,7 +3198,7 @@ async function renderWritingStudentPage(assessmentId, studentId){
 /* ============ WRITING ASSESSMENT: wizard ============ */
 async function openWritingAssessmentWizard(){
   const draft = {
-    subject: null, litPaper: null, litLevel: null, mypYear: null,
+    subject: null, litPaper: null, litLevel: null, mypYear: null, isMethod: null,
     title:'', type:'formative', mode:'in_class_timed', dueDate: todayStr(),
     writingType: WRITING_TYPES[0], writingTypeOther:'', litWritingTypeText:'', methods:[], prompt:'', promptNA:false,
     criteria: null // lazily built from LIT_CRITERIA_PAPER1/2 or IS_CRITERIA_YEARx once known
@@ -2956,6 +3208,10 @@ async function openWritingAssessmentWizard(){
   backdrop.id = 'wa-wizard-backdrop';
   const isLit = ()=> draft.subject === 'Eng Lit DP';
   const isIS = ()=> draft.subject === 'Individuals and Societies MYP';
+  // I&S is the only subject with a choice of assessment approach: Criteria is the only one that
+  // needs the Year/Criteria/Strand steps -- BE/AE/ME/EE and Comments-only behave like any other
+  // non-criteria subject (general skill taxonomy, plain score field or none at all).
+  const needsCriteriaFlow = ()=> isLit() || (isIS() && draft.isMethod === 'criteria');
 
   function syncFormValues(){
     const titleEl = backdrop.querySelector('#wa-title'); if(titleEl) draft.title = titleEl.value;
@@ -3014,12 +3270,50 @@ async function openWritingAssessmentWizard(){
     backdrop.querySelector('#wa-subject-next-btn').addEventListener('click', ()=>{
       if(!draft.subject){ toast('Please choose a subject'); return; }
       if(isLit()) renderLitPaperLevelStep();
-      else if(isIS()) renderISYearStep();
+      else if(isIS()) renderISMethodStep();
       else renderForm();
     });
   }
 
-  /* ---- Step 0b (I&S MYP only): MYP Year band (decides strand wording) ---- */
+  /* ---- Step 0b (I&S MYP only): how will this be assessed? Only "Criteria" leads into the
+     Year/Criteria/Strand steps -- the other two behave like a plain non-criteria subject. ---- */
+  function renderISMethodStep(){
+    backdrop.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Individuals and Societies MYP</h3>
+          <button class="icon-btn" id="close-wa-wizard">&times;</button>
+        </div>
+        <div class="field">
+          <label>How will this be assessed?</label>
+          <div>
+            <span class="chip ${draft.isMethod==='levels'?'selected':''}" data-wa-is-method="levels">BE / AE / ME / EE</span>
+            <span class="chip ${draft.isMethod==='criteria'?'selected':''}" data-wa-is-method="criteria">Criteria</span>
+            <span class="chip ${draft.isMethod==='comments'?'selected':''}" data-wa-is-method="comments">Comments and Feedback Only</span>
+          </div>
+        </div>
+        <div class="row" style="margin-top:14px;">
+          <button class="btn ghost" id="wa-is-method-back-btn">&larr; Back</button>
+          <button class="btn primary" id="wa-is-method-next-btn">Next</button>
+        </div>
+      </div>
+    `;
+    backdrop.querySelector('#close-wa-wizard').addEventListener('click', ()=>backdrop.remove());
+    backdrop.querySelectorAll('[data-wa-is-method]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        draft.isMethod = el.getAttribute('data-wa-is-method');
+        renderISMethodStep();
+      });
+    });
+    backdrop.querySelector('#wa-is-method-back-btn').addEventListener('click', ()=> renderSubjectStep());
+    backdrop.querySelector('#wa-is-method-next-btn').addEventListener('click', ()=>{
+      if(!draft.isMethod){ toast('Please choose how this will be assessed'); return; }
+      if(!IS_WRITING_TYPES.includes(draft.writingType)) draft.writingType = IS_WRITING_TYPES[0];
+      if(draft.isMethod === 'criteria') renderISYearStep(); else renderForm();
+    });
+  }
+
+  /* ---- Step 0c (I&S MYP, Criteria method only): MYP Year band (decides strand wording) ---- */
   function renderISYearStep(){
     backdrop.innerHTML = `
       <div class="modal">
@@ -3047,7 +3341,7 @@ async function openWritingAssessmentWizard(){
         renderISYearStep();
       });
     });
-    backdrop.querySelector('#wa-is-back-btn').addEventListener('click', ()=> renderSubjectStep());
+    backdrop.querySelector('#wa-is-back-btn').addEventListener('click', ()=> renderISMethodStep());
     backdrop.querySelector('#wa-is-next-btn').addEventListener('click', ()=>{
       if(!draft.mypYear){ toast('Please choose a MYP Year'); return; }
       if(!IS_WRITING_TYPES.includes(draft.writingType)) draft.writingType = IS_WRITING_TYPES[0];
@@ -3113,7 +3407,7 @@ async function openWritingAssessmentWizard(){
           <h3>Add Writing Assessment</h3>
           <button class="icon-btn" id="close-wa-wizard">&times;</button>
         </div>
-        <div class="muted" style="margin-bottom:10px;">${escapeHtml(draft.subject)}${isLit() ? ` &middot; ${draft.litPaper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(draft.litLevel)}` : ''}${isIS() ? ` &middot; ${escapeHtml(draft.mypYear)}` : ''}</div>
+        <div class="muted" style="margin-bottom:10px;">${escapeHtml(draft.subject)}${isLit() ? ` &middot; ${draft.litPaper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(draft.litLevel)}` : ''}${isIS() && draft.mypYear ? ` &middot; ${escapeHtml(draft.mypYear)}` : ''}</div>
         <div class="field">
           <label>Title</label>
           <input type="text" id="wa-title" placeholder="e.g. Unseen Poetry Analysis" value="${escapeHtml(draft.title)}">
@@ -3191,7 +3485,7 @@ async function openWritingAssessmentWizard(){
     backdrop.querySelector('#wa-form-back-btn').addEventListener('click', ()=>{
       syncFormValues();
       if(isLit()) renderLitPaperLevelStep();
-      else if(isIS()) renderISYearStep();
+      else if(isIS()) { if(draft.isMethod==='criteria') renderISYearStep(); else renderISMethodStep(); }
       else renderSubjectStep();
     });
     backdrop.querySelector('#wa-to-preview-btn').addEventListener('click', ()=>{
@@ -3219,16 +3513,18 @@ async function openWritingAssessmentWizard(){
           <button class="icon-btn" id="close-wa-wizard2">&times;</button>
         </div>
         <div class="card">
-          <div class="muted">${escapeHtml(draft.subject)}${isLit() ? ` &middot; ${draft.litPaper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(draft.litLevel)}` : ''}${isIS() ? ` &middot; ${escapeHtml(draft.mypYear)}` : ''}</div>
+          <div class="muted">${escapeHtml(draft.subject)}${isLit() ? ` &middot; ${draft.litPaper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(draft.litLevel)}` : ''}${isIS() && draft.mypYear ? ` &middot; ${escapeHtml(draft.mypYear)}` : ''}</div>
           <div style="margin-top:4px;"><strong>${escapeHtml(draft.title)}</strong></div>
           <div class="muted" style="margin-top:4px;">${draft.type==='summative'?'Summative':'Formative'} &middot; ${draft.mode==='in_class_timed'?'In-Class Timed':'Take Home'} &middot; Due ${formatDateNice(draft.dueDate)}</div>
           <div style="margin-top:8px;"><strong>Writing Type:</strong> ${escapeHtml(finalWritingType)}</div>
-          ${(isLit()||isIS()) ? '' : `<div style="margin-top:8px;"><strong>Assessed via:</strong> ${escapeHtml(methodsLabel)}</div>`}
+          ${needsCriteriaFlow() ? '' : isIS()
+            ? `<div style="margin-top:8px;"><strong>Assessed via:</strong> ${draft.isMethod==='levels' ? 'BE / AE / ME / EE' : 'Comments and Feedback Only'}</div>`
+            : `<div style="margin-top:8px;"><strong>Assessed via:</strong> ${escapeHtml(methodsLabel)}</div>`}
           <div style="margin-top:8px;"><strong>${(isLit()||isIS())?'Task Prompt':'Prompt'}:</strong> ${draft.promptNA ? 'Not Applicable' : (draft.prompt.trim() ? escapeHtml(draft.prompt) : '<span class="muted">(none entered)</span>')}</div>
         </div>
         <div class="row" style="margin-top:14px;">
           <button class="btn ghost" id="wa-back-to-form-btn">&larr; Edit</button>
-          ${(isLit()||isIS())
+          ${needsCriteriaFlow()
             ? `<button class="btn primary" id="wa-to-criteria-btn">Submit and Select Criteria / Strands</button>`
             : `<button class="btn primary" id="wa-confirm-btn">Confirm</button>`}
         </div>
@@ -3238,11 +3534,18 @@ async function openWritingAssessmentWizard(){
     backdrop.querySelector('#wa-back-to-form-btn').addEventListener('click', ()=> renderForm());
 
     function buildBaseAssessment(){
+      // I&S "BE/AE/ME/EE" carries that single method through so the student page shows the
+      // Level chips exactly like any other subject using that scale; "Comments and Feedback
+      // Only" and the Criteria flow both save methods:[] (Criteria drives scoring separately).
+      let finalMethods;
+      if(isLit()) finalMethods = [];
+      else if(isIS()) finalMethods = draft.isMethod === 'levels' ? ['be_ae_me_ee'] : [];
+      else finalMethods = draft.methods.slice();
       return {
         id: uuid(), classId: state.currentClassId, title: draft.title.trim(),
         type: draft.type, mode: draft.mode, dueDate: draft.dueDate,
         subject: draft.subject,
-        writingType: finalWritingType, methods: (isLit()||isIS()) ? [] : draft.methods.slice(),
+        writingType: finalWritingType, methods: finalMethods,
         prompt: draft.promptNA ? null : (draft.prompt.trim() || null),
         createdAt: Date.now(), subjectMeta: null
       };
@@ -3530,6 +3833,28 @@ function wireWritingTabEvents(){
   const addBtn = document.getElementById('add-writing-assessment-btn');
   if(addBtn) addBtn.addEventListener('click', ()=> openWritingAssessmentWizard());
 
+  const exportDirBtn = document.getElementById('export-writing-directory-btn');
+  if(exportDirBtn) exportDirBtn.addEventListener('click', ()=> exportWritingDataToDirectory(state.currentClassId));
+  const importDirBtn = document.getElementById('import-writing-directory-btn');
+  const writingDirFileInput = document.getElementById('writing-directory-file-input');
+  if(importDirBtn && writingDirFileInput){
+    importDirBtn.addEventListener('click', ()=> writingDirFileInput.click());
+    writingDirFileInput.addEventListener('change', async (e)=>{
+      const file = e.target.files[0];
+      writingDirFileInput.value = '';
+      if(!file) return;
+      try{
+        const text = await file.text();
+        const bundle = JSON.parse(text);
+        const result = await importWritingDataFromDirectory(state.currentClassId, bundle);
+        openImportWritingDataSummaryModal(result);
+        render();
+      } catch(err){
+        toast(err.message && err.message.includes('recognized') ? err.message : 'Could not read that file as a writing-data export');
+      }
+    });
+  }
+
   document.querySelectorAll('[data-open-assessment]').forEach(el=>{
     el.addEventListener('click', ()=>{
       state.writingSelectedAssessmentId = el.getAttribute('data-open-assessment');
@@ -3544,6 +3869,52 @@ function wireWritingTabEvents(){
     state.writingSelectedAssessmentId = null;
     render();
   });
+
+  // ---- Data tab: Assessments/Data sub-nav, Student/Class sub-tabs, and their controls ----
+  document.querySelectorAll('[data-writing-subnav]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      state.writingView = el.getAttribute('data-writing-subnav')==='data' ? 'data' : 'list';
+      render();
+    });
+  });
+  document.querySelectorAll('[data-writing-dataview]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      state.writingDataView = el.getAttribute('data-writing-dataview')==='class' ? 'class' : 'student';
+      state.writingDataSelectedAssessmentId = null; // switching Student/Class starts back at the overview
+      render();
+    });
+  });
+  const dataStudentSelect = document.getElementById('writing-data-student-select');
+  if(dataStudentSelect) dataStudentSelect.addEventListener('change', ()=>{
+    state.writingDataSelectedStudentId = dataStudentSelect.value;
+    state.writingDataSelectedAssessmentId = null;
+    render();
+  });
+  document.querySelectorAll('[data-writing-data-open-assessment]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      state.writingDataSelectedAssessmentId = el.getAttribute('data-writing-data-open-assessment');
+      render();
+    });
+  });
+  const dataBackToOverviewBtn = document.getElementById('writing-data-back-to-overview');
+  if(dataBackToOverviewBtn) dataBackToOverviewBtn.addEventListener('click', ()=>{
+    state.writingDataSelectedAssessmentId = null;
+    render();
+  });
+  const classDataBackToOverviewBtn = document.getElementById('writing-class-data-back-to-overview');
+  if(classDataBackToOverviewBtn) classDataBackToOverviewBtn.addEventListener('click', ()=>{
+    state.writingDataSelectedAssessmentId = null;
+    render();
+  });
+  const classDataAssessmentSelect = document.getElementById('writing-class-data-assessment-select');
+  if(classDataAssessmentSelect) classDataAssessmentSelect.addEventListener('change', ()=>{
+    state.writingDataSelectedAssessmentId = classDataAssessmentSelect.value || null;
+    render();
+  });
+  // Charts mount into <canvas> elements already in the DOM at this point (render() sets
+  // innerHTML before calling the wire*Events functions) -- fire-and-forget is fine since this
+  // just re-derives the same aggregate data the HTML above was built from.
+  if(state.writingView === 'data') mountWritingCharts();
 
   const exportAllBtn = document.getElementById('export-all-writing-btn');
   if(exportAllBtn) exportAllBtn.addEventListener('click', ()=> exportAllWritingReports(state.writingSelectedAssessmentId));
