@@ -45,6 +45,11 @@
     border-radius:12px; box-shadow:0 8px 24px rgba(20,22,30,0.15); padding:6px; min-width:180px; z-index:40;
     display:flex; flex-direction:column; gap:2px;
   }
+  /* .menu-panel's own display:flex has the same specificity as the browser's default
+     [hidden]{display:none} rule, and author styles win ties -- so without this, toggling the
+     hidden attribute did nothing and the menu stayed visually open forever. This rule is more
+     specific (class+attribute) so it correctly wins and actually hides it. */
+  .menu-panel[hidden]{display:none;}
   .menu-item{
     appearance:none; border:none; background:transparent; text-align:left; padding:10px 12px; border-radius:8px;
     font-size:14px; font-weight:600; color:var(--ink); cursor:pointer; width:100%;
@@ -115,11 +120,12 @@
      sized to fit a 10.5in iPad screen without scrolling. */
   .taxonomy-picker{display:grid; grid-template-columns:1fr auto 1fr; gap:0;}
   .taxonomy-divider{width:1px; background:var(--line); margin:0 14px;}
-  .taxonomy-col{display:flex; flex-direction:column; gap:6px; min-width:0;}
+  .taxonomy-col{display:flex; flex-direction:column; gap:8px; min-width:0;}
   .taxonomy-col-label{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:2px;}
   .taxonomy-col-label.positive{color:var(--good);}
   .taxonomy-col-label.negative{color:var(--bad);}
   .taxonomy-col-label.neutral{color:var(--muted);}
+  .taxonomy-tile-wrap{position:relative;}
   .taxonomy-tile{
     appearance:none; text-align:left; width:100%; border-radius:9px; padding:8px 11px; font-size:13.5px; font-weight:600;
     cursor:pointer; border:1px solid transparent; line-height:1.2; font-family:inherit;
@@ -128,9 +134,15 @@
   .taxonomy-tile.positive{background:#e2f5e9; color:#1d6b3f; border-color:#c7ead6;}
   .taxonomy-tile.negative{background:#fbe4e1; color:#a3291b; border-color:#f4c7c1;}
   .taxonomy-tile.neutral{background:#e7e9ee; color:#3f4654; border-color:#d7dae0;}
+  .taxonomy-tile-badge{
+    position:absolute; top:-7px; right:-7px; background:var(--ink); color:#fff; font-size:10px; font-weight:700;
+    border-radius:10px; min-width:18px; height:18px; padding:0 5px; display:flex; align-items:center; justify-content:center;
+    border:2px solid var(--panel); cursor:pointer; font-family:inherit; z-index:1;
+  }
+  .taxonomy-tile-badge:active{background:#3a4152;}
   .taxonomy-neutral-row{margin-top:14px; padding-top:12px; border-top:1px solid var(--line);}
   .taxonomy-neutral-tiles{display:flex; gap:10px; flex-wrap:wrap;}
-  .taxonomy-neutral-tiles .taxonomy-tile{flex:1 1 150px;}
+  .taxonomy-neutral-tiles .taxonomy-tile-wrap{flex:1 1 150px;}
   .cat-btn{
     display:block; width:100%; text-align:left; padding:16px; border-radius:12px; border:1px solid var(--line);
     background:#fafbfc; font-size:16px; font-weight:600; margin-bottom:10px; cursor:pointer;
@@ -192,8 +204,9 @@ const TAXONOMY = [
   { key:'well_prepared', label:'Well Prepared', polarity:'positive', subtypes:null },
   { key:'high_level_classwork', label:'High Level of Classwork', polarity:'positive', subtypes:null },
   { key:'shows_improvement', label:'Shows Improvement', polarity:'positive', subtypes:null },
-  { key:'called_on_correct', label:'Called on and answers correctly', polarity:'positive', subtypes:null },
-  // Negative
+  // Negative -- Off Topic / Poor Logic sit first so they line up with the answer tiles above
+  { key:'off_topic_response', label:'Off Topic Response', polarity:'negative', subtypes:null },
+  { key:'poor_logic_response', label:'Poor Logic Response / No Answer', polarity:'negative', subtypes:null },
   { key:'not_doing_classwork', label:'Not Doing Classwork', polarity:'negative', subtypes:null },
   { key:'arrives_late', label:'Arrives Late', polarity:'negative', subtypes:null },
   { key:'chatting', label:'Chatting', polarity:'negative', subtypes:null },
@@ -204,17 +217,15 @@ const TAXONOMY = [
   { key:'inactive', label:'Inactive', polarity:'negative', subtypes:null },
   { key:'interrupts_calls_out', label:'Interrupts/Calls Out', polarity:'negative', subtypes:null },
   { key:'rude_negative', label:'Rude/Negative', polarity:'negative', subtypes:null },
-  { key:'off_topic_response', label:'Off Topic Response', polarity:'negative', subtypes:null },
-  { key:'poor_logic_response', label:'Poor Logic Response', polarity:'negative', subtypes:null },
   // Neutral
   { key:'absent', label:'Absent', polarity:'neutral', subtypes:null },
   { key:'visible_distress', label:'Visible Distress', polarity:'neutral', subtypes:null },
   { key:'sleeping', label:'Sleeping', polarity:'neutral', subtypes:null }
 ];
-// The 3 categories that count as "answered" for the green checkmark and the Pick-a-Student
-// auto "called on" tag -- any of the three counts, so random-pick tracking keeps working
-// however the correct answer came about (raised hand, cold call, or the picker tool).
-const ANSWER_CATEGORY_KEYS = new Set(['raises_hand_correct','cold_call_correct','called_on_correct']);
+// The 2 categories that count as "answered" for the green checkmark and the Pick-a-Student
+// auto "called on" tag -- either counts, so random-pick tracking keeps working however the
+// correct answer came about (raised hand or cold call/picker tool).
+const ANSWER_CATEGORY_KEYS = new Set(['raises_hand_correct','cold_call_correct']);
 const REASON_TAGS = ['Great Insight','Helped a Classmate','Improved Effort','Strong Focus','Creative Thinking','Kindness'];
 const NO_ENTRIES_KEY = 'no_entries';
 const STUDENT_OF_CLASS_KEY = 'student_of_class';
@@ -849,28 +860,38 @@ const LEGACY_SUBTYPE_MIGRATION = {
 // handled separately from the plain lookup table above because its destination depends on
 // whether it was tagged as a called-on response (viaRandomPick) at the time it was logged.
 function migrateLegacyEventCategory(ev){
+  let changed = false;
   if(ev.category === 'shares_idea' && ev.subtype === 'good_answer'){
+    // 'called_on_correct' didn't exist yet as of v5 -- the check below folds it straight
+    // into cold_call_correct in the same pass, so this stays a single, simple rewrite.
     ev.category = ev.viaRandomPick ? 'called_on_correct' : 'raises_hand_correct';
     ev.subtype = null;
-    return true;
+    changed = true;
+  } else {
+    const mapKey = ev.category + '|' + (ev.subtype || 'null');
+    const newKey = LEGACY_SUBTYPE_MIGRATION[mapKey];
+    if(newKey){
+      // None of the migrated categories have a "called on" concept, so clear any stale flag
+      // rather than let an unrelated category show a "(called on)" label.
+      delete ev.viaRandomPick;
+      ev.category = newKey;
+      ev.subtype = null;
+      changed = true;
+    }
   }
-  const mapKey = ev.category + '|' + (ev.subtype || 'null');
-  const newKey = LEGACY_SUBTYPE_MIGRATION[mapKey];
-  if(newKey){
-    // None of the migrated categories still have a "called on" concept (that's now only
-    // tracked via the dedicated Called on and answers correctly category), so clear any
-    // stale flag rather than let an unrelated category show a "(called on)" label.
-    delete ev.viaRandomPick;
-    ev.category = newKey;
-    ev.subtype = null;
-    return true;
+  // v5: "Called on and answers correctly" was retired as a duplicate of Cold Call Correct
+  // Answer -- fold anything that ended up there (whether logged manually during the week it
+  // existed, or produced by the branch just above) into cold_call_correct.
+  if(ev.category === 'called_on_correct'){
+    ev.category = 'cold_call_correct';
+    changed = true;
   }
-  return false;
+  return changed;
 }
 
 /* ============ INDEXEDDB LAYER ============ */
 const DB_NAME = 'classroomTrackerDB';
-const DB_VERSION = 4; // v4 retires the old behavior taxonomy and migrates existing events onto the flat 2.0 categories
+const DB_VERSION = 5; // v5 folds the retired "Called on and answers correctly" duplicate into Cold Call Correct Answer
 
 function openDB(){
   if(openDB._p) return openDB._p;
@@ -914,10 +935,11 @@ function openDB(){
         s.createIndex('assessmentId','assessmentId',{unique:false});
         s.createIndex('studentId','studentId',{unique:false});
       }
-      // v4: rewrite every existing event still under a retired category/subtype onto its
-      // closest new flat-taxonomy key (see LEGACY_SUBTYPE_MIGRATION above), so historical
-      // Weekly Report / Data tab / export data keeps working under the 2.0 category list.
-      if(e.oldVersion > 0 && e.oldVersion < 4 && db.objectStoreNames.contains('events')){
+      // v4/v5: rewrite every existing event still under a retired category/subtype (or under
+      // the briefly-shipped, now-duplicate called_on_correct) onto its closest new flat-taxonomy
+      // key -- see migrateLegacyEventCategory above. Gated on <5 (not <4) so devices that already
+      // received last week's v4 build still get the called_on_correct->cold_call_correct fold.
+      if(e.oldVersion > 0 && e.oldVersion < 5 && db.objectStoreNames.contains('events')){
         const store = e.target.transaction.objectStore('events');
         const cursorReq = store.openCursor();
         cursorReq.onsuccess = (ce)=>{
@@ -1572,9 +1594,23 @@ function wireClassHome(){
   const classMenuToggle = document.getElementById('class-menu-toggle');
   const classMenuPanel = document.getElementById('class-menu-panel');
   if(classMenuToggle && classMenuPanel){
+    let outsideMenuClickHandler = null;
+    const closeClassMenu = () => {
+      classMenuPanel.hidden = true;
+      if(outsideMenuClickHandler){ document.removeEventListener('click', outsideMenuClickHandler); outsideMenuClickHandler = null; }
+    };
     classMenuToggle.addEventListener('click', (e)=>{
       e.stopPropagation();
+      const willOpen = classMenuPanel.hidden;
       classMenuPanel.hidden = !classMenuPanel.hidden;
+      if(willOpen){
+        outsideMenuClickHandler = (ev)=>{
+          if(!classMenuPanel.contains(ev.target) && ev.target!==classMenuToggle) closeClassMenu();
+        };
+        document.addEventListener('click', outsideMenuClickHandler);
+      } else {
+        closeClassMenu();
+      }
     });
   }
   document.getElementById('edit-roster-btn').addEventListener('click', ()=>{
@@ -1947,13 +1983,29 @@ async function handlePickRandomStudent(){
 
 /* ---- Event logging modal ---- */
 // Tap-to-log picker (2.0): fixed, flat, no subtypes -- Positive/Negative render as two columns
-// side by side with a divider, Neutral renders as a row underneath. A single tap logs and closes.
-function openEventModal(student){
+// side by side with a divider, Neutral renders as a row underneath. A single tap on a tile logs
+// and closes (keeps the fast one-student-after-another workflow); a category already logged
+// today for this student shows a count badge you can tap to see/remove those entries in place.
+async function openEventModal(student){
+  const todaySession = await findTodaySession(state.currentClassId);
+  const todayEvents = todaySession
+    ? (await dbGetAllByIndex('events','sessionId', todaySession.id)).filter(e=>e.studentId===student.id && e.category!==NO_ENTRIES_KEY)
+    : [];
+  const countByCategory = {};
+  todayEvents.forEach(e=>{ countByCategory[e.category] = (countByCategory[e.category]||0)+1; });
+
   const positives = TAXONOMY.filter(t=>t.polarity==='positive');
   const negatives = TAXONOMY.filter(t=>t.polarity==='negative');
   const neutrals = TAXONOMY.filter(t=>t.polarity==='neutral');
 
-  const tile = (t) => `<button class="taxonomy-tile ${t.polarity}" data-cat="${t.key}">${escapeHtml(t.label)}</button>`;
+  const tile = (t) => {
+    const count = countByCategory[t.key] || 0;
+    return `
+    <div class="taxonomy-tile-wrap">
+      <button class="taxonomy-tile ${t.polarity}" data-cat="${t.key}">${escapeHtml(t.label)}</button>
+      ${count ? `<button class="taxonomy-tile-badge" data-manage-cat="${t.key}" title="Tap to view or remove today's ${escapeHtml(t.label)} entries">${count}</button>` : ''}
+    </div>`;
+  };
 
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
@@ -1991,6 +2043,60 @@ function openEventModal(student){
       const key = el.getAttribute('data-cat');
       backdrop.remove();
       logEvent(student, key, null);
+    });
+  });
+  backdrop.querySelectorAll('[data-manage-cat]').forEach(el=>{
+    el.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const key = el.getAttribute('data-manage-cat');
+      backdrop.remove();
+      openCategoryManageModal(student, key);
+    });
+  });
+}
+
+// Opened from a tile's count badge: shows exactly what was logged today for that one category
+// (with timestamps) and lets the teacher remove an accidental tap right there, then returns to
+// the same picker (counts refreshed) so fixing a mistake never leaves the tap-to-log flow.
+async function openCategoryManageModal(student, categoryKey){
+  const todaySession = await findTodaySession(state.currentClassId);
+  const events = todaySession
+    ? (await dbGetAllByIndex('events','sessionId', todaySession.id))
+        .filter(e=>e.studentId===student.id && e.category===categoryKey)
+        .sort((a,b)=>b.timestamp-a.timestamp)
+    : [];
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'category-manage-modal-backdrop';
+  const rowsHtml = events.map(e=>{
+    const time = new Date(e.timestamp).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+    return `
+    <div class="log-entry-row">
+      <span>${time}${e.viaRandomPick ? ' &middot; called on' : ''}</span>
+      <button class="remove-entry-btn" data-remove-log-event="${e.id}" title="Remove this entry" aria-label="Remove this entry">&times;</button>
+    </div>`;
+  }).join('');
+  backdrop.innerHTML = `
+    <div class="modal">
+      <div class="modal-header">
+        <h3>${escapeHtml(student.name)} &mdash; ${escapeHtml(catLabel(categoryKey))}</h3>
+        <button class="icon-btn" id="close-category-manage-modal">&times;</button>
+      </div>
+      ${rowsHtml || '<div class="empty">No entries logged today.</div>'}
+      <button class="btn ghost block" id="category-manage-back-btn" style="margin-top:14px;">&larr; Back to Categories</button>
+    </div>`;
+  document.body.appendChild(backdrop);
+
+  const backToPicker = () => { backdrop.remove(); openEventModal(student); };
+  backdrop.querySelector('#close-category-manage-modal').addEventListener('click', backToPicker);
+  backdrop.querySelector('#category-manage-back-btn').addEventListener('click', backToPicker);
+  backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) backToPicker(); });
+  backdrop.querySelectorAll('[data-remove-log-event]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      await dbDelete('events', btn.getAttribute('data-remove-log-event'));
+      backdrop.remove();
+      toast('Entry removed', 'good');
+      openEventModal(student);
     });
   });
 }
@@ -2760,41 +2866,74 @@ async function computeWritingStatus(assessmentId, studentId){
 }
 
 /* ============ WRITING ASSESSMENT: data aggregation ============ */
-function rankWritingSkills(bySkill, polarity){
+// `bySkill` drives the ranking/sort order; `instanceBySkill` (optional) carries the raw tap
+// count for display alongside it when the two differ (see the prevalence-vs-instances note
+// on the aggregate functions below).
+function rankWritingSkills(bySkill, instanceBySkill, polarity){
   return Object.keys(bySkill)
-    .map(key=>({ key, label: writingSkillLabel(polarity, key), count: bySkill[key] }))
+    .map(key=>({
+      key, label: writingSkillLabel(polarity, key),
+      count: bySkill[key],
+      instances: (instanceBySkill && instanceBySkill[key]!=null) ? instanceBySkill[key] : bySkill[key]
+    }))
     .sort((x,y)=> y.count - x.count || x.label.localeCompare(y.label));
+}
+// Returns at least `n` ranked items, extended to include anything tied with the nth item's
+// count -- so "Top 3" never silently hides a tie for 3rd place (or 4th, 5th...).
+function topWithTies(ranked, n){
+  if(ranked.length <= n) return ranked.slice();
+  const cutoff = ranked[n-1].count;
+  let end = n;
+  while(end < ranked.length && ranked[end].count === cutoff) end++;
+  return ranked.slice(0, end);
 }
 
 // Aggregates one student's writing tags either across every assessment in the class
 // (assessmentId omitted) or scoped to a single assessment. Used for both the Student Data
 // overview and the per-assessment drill-down (same shape, different scope).
+//
+// Ranking is by PREVALENCE, not raw taps, once more than one assessment is in scope: a skill
+// that can fire multiple times on one essay (Grammar, Weak Evidence) structurally outpaces a
+// skill that's inherently one-shot per essay (Thesis) under a raw count, and that bias only
+// compounds as more assessments pile up. So each skill counts at most once per assessment
+// before being summed across assessments -- "appeared in 4 of 6 essays", not "flagged 9 times".
+// Raw instance totals are kept alongside (as `instances`) for context. Scoped to a single
+// assessment there's nothing to collapse -- one cell is the finest grain, same as the actual
+// grading screen -- so counts stay raw there.
 async function computeStudentWritingAggregate(classId, studentId, assessmentId){
   const allAssessments = (await dbGetAllByIndex('writingAssessments','classId', classId))
     .sort((a,b)=> (a.dueDate||'').localeCompare(b.dueDate||'') || a.createdAt - b.createdAt);
   const assessments = assessmentId ? allAssessments.filter(a=>a.id===assessmentId) : allAssessments;
+  const singleAssessmentScope = assessments.length <= 1;
 
-  const posBySkill = {}, negBySkill = {};
+  const posPrevalence = {}, negPrevalence = {};
+  const posInstances = {}, negInstances = {};
   let posTotal = 0, negTotal = 0;
   const trend = [];
 
   for(const a of assessments){
     const events = (await dbGetAllByIndex('writingEvents','assessmentId', a.id)).filter(e=>e.studentId===studentId);
     let aPos = 0, aNeg = 0;
+    const posSeen = new Set(), negSeen = new Set();
     events.forEach(e=>{
-      if(e.polarity==='positive'){ posBySkill[e.skillKey]=(posBySkill[e.skillKey]||0)+1; posTotal++; aPos++; }
-      else { negBySkill[e.skillKey]=(negBySkill[e.skillKey]||0)+1; negTotal++; aNeg++; }
+      if(e.polarity==='positive'){ posInstances[e.skillKey]=(posInstances[e.skillKey]||0)+1; posSeen.add(e.skillKey); posTotal++; aPos++; }
+      else { negInstances[e.skillKey]=(negInstances[e.skillKey]||0)+1; negSeen.add(e.skillKey); negTotal++; aNeg++; }
     });
+    posSeen.forEach(k=> posPrevalence[k]=(posPrevalence[k]||0)+1);
+    negSeen.forEach(k=> negPrevalence[k]=(negPrevalence[k]||0)+1);
     trend.push({ assessmentId:a.id, title:a.title, dueDate:a.dueDate, posCount:aPos, negCount:aNeg });
   }
 
-  const positiveRanked = rankWritingSkills(posBySkill, 'positive');
-  const negativeRanked = rankWritingSkills(negBySkill, 'negative');
+  const posBySkill = singleAssessmentScope ? posInstances : posPrevalence;
+  const negBySkill = singleAssessmentScope ? negInstances : negPrevalence;
+  const positiveRanked = rankWritingSkills(posBySkill, posInstances, 'positive');
+  const negativeRanked = rankWritingSkills(negBySkill, negInstances, 'negative');
   return {
     posBySkill, negBySkill, posTotal, negTotal,
     positiveRanked, negativeRanked,
-    topPositive: positiveRanked.slice(0,3),
-    topNegative: negativeRanked.slice(0,3),
+    topPositive: topWithTies(positiveRanked, 3),
+    topNegative: topWithTies(negativeRanked, 3),
+    denominator: singleAssessmentScope ? null : assessments.length,
     trend
   };
 }
@@ -2803,13 +2942,20 @@ async function computeStudentWritingAggregate(classId, studentId, assessmentId){
 // class AVERAGE (since raw totals aren't comparable across assessments with different
 // participation), and one point per student (positive count x, negative count y) for the
 // outlier scatter plot -- scoped to all-time or a single assessment, same as the student version.
+//
+// Same prevalence-over-raw-count principle as computeStudentWritingAggregate, just collapsed
+// per (student, assessment) pair instead of per assessment -- one loud student getting Grammar
+// flagged 3x on one essay shouldn't outrank Thesis being a genuine issue across many students.
+// Scoped to a single assessment this naturally reduces to "how many students had it at least
+// once on this assignment", which is the right comparison at that scope too.
 async function computeClassWritingAggregate(classId, assessmentId){
   const students = (await dbGetAllByIndex('students','classId', classId)).filter(s=>s.active!==false);
   const allAssessments = (await dbGetAllByIndex('writingAssessments','classId', classId))
     .sort((a,b)=> (a.dueDate||'').localeCompare(b.dueDate||'') || a.createdAt - b.createdAt);
   const assessments = assessmentId ? allAssessments.filter(a=>a.id===assessmentId) : allAssessments;
 
-  const posBySkill = {}, negBySkill = {};
+  const posPrevalence = {}, negPrevalence = {};
+  const posInstances = {}, negInstances = {};
   let posTotal = 0, negTotal = 0;
   const trend = [];
   const perStudentTotals = {};
@@ -2818,26 +2964,35 @@ async function computeClassWritingAggregate(classId, assessmentId){
   for(const a of assessments){
     const events = await dbGetAllByIndex('writingEvents','assessmentId', a.id);
     let aPos = 0, aNeg = 0;
+    const posSeenByStudent = {}, negSeenByStudent = {}; // studentId -> Set of skill keys seen on THIS assessment
     events.forEach(e=>{
       if(!perStudentTotals.hasOwnProperty(e.studentId)) return; // student no longer active/on roster
-      if(e.polarity==='positive'){ posBySkill[e.skillKey]=(posBySkill[e.skillKey]||0)+1; posTotal++; aPos++; perStudentTotals[e.studentId].pos++; }
-      else { negBySkill[e.skillKey]=(negBySkill[e.skillKey]||0)+1; negTotal++; aNeg++; perStudentTotals[e.studentId].neg++; }
+      if(e.polarity==='positive'){
+        posInstances[e.skillKey]=(posInstances[e.skillKey]||0)+1; posTotal++; aPos++; perStudentTotals[e.studentId].pos++;
+        (posSeenByStudent[e.studentId] = posSeenByStudent[e.studentId] || new Set()).add(e.skillKey);
+      } else {
+        negInstances[e.skillKey]=(negInstances[e.skillKey]||0)+1; negTotal++; aNeg++; perStudentTotals[e.studentId].neg++;
+        (negSeenByStudent[e.studentId] = negSeenByStudent[e.studentId] || new Set()).add(e.skillKey);
+      }
     });
+    Object.values(posSeenByStudent).forEach(set=> set.forEach(k=> posPrevalence[k]=(posPrevalence[k]||0)+1));
+    Object.values(negSeenByStudent).forEach(set=> set.forEach(k=> negPrevalence[k]=(negPrevalence[k]||0)+1));
     const denom = students.length || 1;
     trend.push({ assessmentId:a.id, title:a.title, dueDate:a.dueDate, avgPos: aPos/denom, avgNeg: aNeg/denom });
   }
 
-  const positiveRanked = rankWritingSkills(posBySkill, 'positive');
-  const negativeRanked = rankWritingSkills(negBySkill, 'negative');
+  const positiveRanked = rankWritingSkills(posPrevalence, posInstances, 'positive');
+  const negativeRanked = rankWritingSkills(negPrevalence, negInstances, 'negative');
   const scatterPoints = students
     .map(s=>({ studentId:s.id, name:s.name, firstName: s.name.split(' ')[0], posCount: perStudentTotals[s.id].pos, negCount: perStudentTotals[s.id].neg }))
     .filter(p=> p.posCount>0 || p.negCount>0);
 
   return {
-    posBySkill, negBySkill, posTotal, negTotal,
+    posBySkill: posPrevalence, negBySkill: negPrevalence, posTotal, negTotal,
     positiveRanked, negativeRanked,
-    topPositive: positiveRanked.slice(0,3),
-    topNegative: negativeRanked.slice(0,3),
+    topPositive: topWithTies(positiveRanked, 3),
+    topNegative: topWithTies(negativeRanked, 3),
+    denominator: (students.length || 0) * (assessments.length || 0),
     trend, scatterPoints
   };
 }
@@ -2955,24 +3110,64 @@ async function renderWritingTab(){
   return writingSubNavHtml() + await renderWritingAssessmentList();
 }
 
+// One ranked row: with a denominator (the multi-assessment/multi-student prevalence scopes)
+// shows "N of D" plus the raw tap count as secondary color when it differs; without one (the
+// single-assessment raw-count scope) falls back to the plain "xN" the app always used.
+function writingAggRowHtml(rank, x, denominator){
+  const extra = (denominator && x.instances !== x.count) ? ` <span class="muted">(${x.instances} tap${x.instances===1?'':'s'})</span>` : '';
+  const countText = denominator ? `${x.count} of ${denominator}` : `&times;${x.count}`;
+  return `<div style="margin-bottom:4px;">${rank}. ${escapeHtml(x.label)} <span class="muted">&mdash; ${countText}</span>${extra}</div>`;
+}
 function writingAggregateSummaryHtml(agg, scopeLabel){
   const posHtml = agg.topPositive.length
-    ? agg.topPositive.map((x,i)=>`<div style="margin-bottom:4px;">${i+1}. ${escapeHtml(x.label)} <span class="muted">&times;${x.count}</span></div>`).join('')
+    ? agg.topPositive.map((x,i)=>writingAggRowHtml(i+1, x, agg.denominator)).join('')
     : `<div class="muted">No data yet.</div>`;
   const negHtml = agg.topNegative.length
-    ? agg.topNegative.map((x,i)=>`<div style="margin-bottom:4px;">${i+1}. ${escapeHtml(x.label)} <span class="muted">&times;${x.count}</span></div>`).join('')
+    ? agg.topNegative.map((x,i)=>writingAggRowHtml(i+1, x, agg.denominator)).join('')
     : `<div class="muted">No data yet.</div>`;
+  // "View Full List" only shows up when there's genuinely more beyond what's already displayed
+  // (topPositive/topNegative already expand past 3 to include ties at the cutoff).
+  const posMore = agg.positiveRanked.length > agg.topPositive.length;
+  const negMore = agg.negativeRanked.length > agg.topNegative.length;
   return `
     <div class="grid-cards">
       <div class="card">
-        <div class="row between"><strong>Top 3 Writing Successes</strong><span class="tag positive">${escapeHtml(scopeLabel)}</span></div>
+        <div class="row between"><strong>Top Writing Successes</strong><span class="tag positive">${escapeHtml(scopeLabel)}</span></div>
         <div style="margin-top:8px;">${posHtml}</div>
+        ${posMore ? `<button class="btn ghost" style="padding:6px 10px; font-size:12px; margin-top:4px;" data-view-full-writing-list="positive">View Full List</button>` : ''}
       </div>
       <div class="card">
-        <div class="row between"><strong>Bottom 3 Writing Challenges</strong><span class="tag negative">${escapeHtml(scopeLabel)}</span></div>
+        <div class="row between"><strong>Top Writing Challenges</strong><span class="tag negative">${escapeHtml(scopeLabel)}</span></div>
         <div style="margin-top:8px;">${negHtml}</div>
+        ${negMore ? `<button class="btn ghost" style="padding:6px 10px; font-size:12px; margin-top:4px;" data-view-full-writing-list="negative">View Full List</button>` : ''}
       </div>
     </div>`;
+}
+// Opened from "View Full List": the complete ranked breakdown (not just the top 3-ish), so the
+// teacher can see for themselves whether the tail is a tight cluster or a real cliff.
+function openWritingFullListModal(ranked, denominator, title){
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'writing-full-list-modal-backdrop';
+  const rowsHtml = ranked.length
+    ? ranked.map((x,i)=>`<div class="log-entry-row"><span>${i+1}. ${escapeHtml(x.label)}</span>${writingAggCountBadgeHtml(x, denominator)}</div>`).join('')
+    : '<div class="empty">No data yet.</div>';
+  backdrop.innerHTML = `
+    <div class="modal">
+      <div class="modal-header">
+        <h3>${escapeHtml(title)}</h3>
+        <button class="icon-btn" id="close-writing-full-list-modal">&times;</button>
+      </div>
+      ${rowsHtml}
+    </div>`;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#close-writing-full-list-modal').addEventListener('click', ()=>backdrop.remove());
+  backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) backdrop.remove(); });
+}
+function writingAggCountBadgeHtml(x, denominator){
+  const extra = (denominator && x.instances !== x.count) ? ` <span class="muted">(${x.instances} tap${x.instances===1?'':'s'})</span>` : '';
+  const countText = denominator ? `${x.count} of ${denominator}` : `&times;${x.count}`;
+  return `<span class="muted">${countText}</span>${extra}`;
 }
 
 async function renderWritingDataView(){
@@ -4067,6 +4262,17 @@ function wireWritingTabEvents(){
     el.addEventListener('click', ()=>{
       state.writingView = el.getAttribute('data-writing-subnav')==='data' ? 'data' : 'list';
       render();
+    });
+  });
+  document.querySelectorAll('[data-view-full-writing-list]').forEach(el=>{
+    el.addEventListener('click', async ()=>{
+      const polarity = el.getAttribute('data-view-full-writing-list');
+      const agg = state.writingDataView==='class'
+        ? await computeClassWritingAggregate(state.currentClassId, state.writingDataSelectedAssessmentId)
+        : await computeStudentWritingAggregate(state.currentClassId, state.writingDataSelectedStudentId, state.writingDataSelectedAssessmentId);
+      const ranked = polarity==='positive' ? agg.positiveRanked : agg.negativeRanked;
+      const title = polarity==='positive' ? 'All Writing Successes' : 'All Writing Challenges';
+      openWritingFullListModal(ranked, agg.denominator, title);
     });
   });
   document.querySelectorAll('[data-writing-dataview]').forEach(el=>{
