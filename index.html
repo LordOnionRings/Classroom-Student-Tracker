@@ -34,10 +34,23 @@
   }
   .btn:active{transform:scale(0.97);}
   .btn.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent);}
-  .btn.ghost{background:transparent; border-color:transparent; color:var(--accent); padding:8px 10px;}
+  .btn.ghost{background:var(--panel); border:1px solid var(--line); color:var(--ink); padding:8px 14px;}
+  .btn.ghost:active{background:#eef0f3;}
   .btn.danger{background:#fff; color:var(--bad); border-color:#f1c2be;}
   .btn.small{padding:8px 12px; font-size:13px; border-radius:8px;}
   .btn.block{width:100%;}
+  .menu-wrap{position:relative;}
+  .menu-panel{
+    position:absolute; top:calc(100% + 6px); right:0; background:var(--panel); border:1px solid var(--line);
+    border-radius:12px; box-shadow:0 8px 24px rgba(20,22,30,0.15); padding:6px; min-width:180px; z-index:40;
+    display:flex; flex-direction:column; gap:2px;
+  }
+  .menu-item{
+    appearance:none; border:none; background:transparent; text-align:left; padding:10px 12px; border-radius:8px;
+    font-size:14px; font-weight:600; color:var(--ink); cursor:pointer; width:100%;
+  }
+  .menu-item:active{background:#eef0f3;}
+  .menu-item.danger{color:var(--bad);}
   .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:16px; margin-bottom:12px;}
   .card.clickable{cursor:pointer;}
   .card.clickable:active{transform:scale(0.995);}
@@ -57,10 +70,10 @@
     background:#eef3ff; border:1px solid #cfe0ff; margin-bottom:14px; font-size:14px;
   }
   .session-banner.closed{background:#f1f2f4; border-color:var(--line);}
-  .student-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:12px;}
+  .student-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(148px,1fr)); gap:12px;}
   .student-btn{
     background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px 10px;
-    min-height:96px; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    min-height:102px; display:flex; flex-direction:column; align-items:center; justify-content:center;
     gap:8px; cursor:pointer; text-align:center; position:relative; border-top:5px solid transparent;
   }
   .student-btn:active{transform:scale(0.96); background:#eef3ff;}
@@ -68,11 +81,19 @@
     width:44px; height:44px; border-radius:50%; background:#8a94a6; color:#fff; font-weight:700;
     display:flex; align-items:center; justify-content:center; font-size:16px; flex-shrink:0;
   }
-  .student-name{font-weight:600; font-size:14px;}
+  .student-name{font-weight:600; font-size:15.5px; line-height:1.25;}
   .event-badge{
     position:absolute; top:8px; right:8px; background:var(--ink); color:#fff; font-size:11px; font-weight:700;
-    border-radius:10px; padding:2px 7px;
+    border-radius:10px; padding:2px 7px; border:none; font-family:inherit; cursor:pointer;
   }
+  button.event-badge:active{background:#3a4152;}
+  .log-entry-row{display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--line); gap:10px;}
+  .log-entry-row:last-child{border-bottom:none;}
+  .remove-entry-btn{
+    appearance:none; border:1px solid #f1c2be; background:#fff; color:var(--bad); width:30px; height:30px;
+    border-radius:50%; font-size:18px; line-height:1; cursor:pointer; flex-shrink:0;
+  }
+  .remove-entry-btn:active{background:#fdeceb;}
   .answered-badge{
     position:absolute; bottom:8px; right:8px; width:18px; height:18px; border-radius:50%;
     background:var(--good); color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;
@@ -87,8 +108,29 @@
     padding:20px; animation:up .15s ease-out;
   }
   @media(min-width:640px){ .modal{border-radius:18px;} }
+  .modal.modal-wide{max-width:760px;}
   @keyframes up{from{transform:translateY(24px); opacity:0;} to{transform:translateY(0); opacity:1;}}
   .modal-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
+  /* Behavior taxonomy 2.0 picker: two columns (positive/negative) + a neutral row below,
+     sized to fit a 10.5in iPad screen without scrolling. */
+  .taxonomy-picker{display:grid; grid-template-columns:1fr auto 1fr; gap:0;}
+  .taxonomy-divider{width:1px; background:var(--line); margin:0 14px;}
+  .taxonomy-col{display:flex; flex-direction:column; gap:6px; min-width:0;}
+  .taxonomy-col-label{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:2px;}
+  .taxonomy-col-label.positive{color:var(--good);}
+  .taxonomy-col-label.negative{color:var(--bad);}
+  .taxonomy-col-label.neutral{color:var(--muted);}
+  .taxonomy-tile{
+    appearance:none; text-align:left; width:100%; border-radius:9px; padding:8px 11px; font-size:13.5px; font-weight:600;
+    cursor:pointer; border:1px solid transparent; line-height:1.2; font-family:inherit;
+  }
+  .taxonomy-tile:active{transform:scale(0.97);}
+  .taxonomy-tile.positive{background:#e2f5e9; color:#1d6b3f; border-color:#c7ead6;}
+  .taxonomy-tile.negative{background:#fbe4e1; color:#a3291b; border-color:#f4c7c1;}
+  .taxonomy-tile.neutral{background:#e7e9ee; color:#3f4654; border-color:#d7dae0;}
+  .taxonomy-neutral-row{margin-top:14px; padding-top:12px; border-top:1px solid var(--line);}
+  .taxonomy-neutral-tiles{display:flex; gap:10px; flex-wrap:wrap;}
+  .taxonomy-neutral-tiles .taxonomy-tile{flex:1 1 150px;}
   .cat-btn{
     display:block; width:100%; text-align:left; padding:16px; border-radius:12px; border:1px solid var(--line);
     background:#fafbfc; font-size:16px; font-weight:600; margin-bottom:10px; cursor:pointer;
@@ -137,33 +179,42 @@
 <div id="toast-root" class="toast-root"></div>
 
 <script>
-/* ============ CONFIG: EVENT TAXONOMY ============ */
+/* ============ CONFIG: EVENT TAXONOMY (2.0) ============
+   Fixed, flat, no subtypes -- baked in for every class regardless of department. Positive/
+   Negative render as two columns; Neutral renders as a row below. Colors: green/red/grey. */
 const TAXONOMY = [
-  { key:'shares_idea', label:'Shares Idea', polarity:'neutral',
-    subtypes:[
-      {key:'good_answer', label:'Good Answer'},
-      {key:'creative', label:'Creative'},
-      {key:'poor_logic', label:'Poor Logic'},
-      {key:'off_topic', label:'Off-Topic'}
-    ]},
+  // Positive
+  { key:'raises_hand_correct', label:'Raises Hand Correct Answer', polarity:'positive', subtypes:null },
+  { key:'cold_call_correct', label:'Cold Call Correct Answer', polarity:'positive', subtypes:null },
+  { key:'helps_others', label:'Helps Others', polarity:'positive', subtypes:null },
+  { key:'creative_ideas', label:'Creative Ideas', polarity:'positive', subtypes:null },
+  { key:'good_notes', label:'Takes Good Notes', polarity:'positive', subtypes:null },
+  { key:'well_prepared', label:'Well Prepared', polarity:'positive', subtypes:null },
+  { key:'high_level_classwork', label:'High Level of Classwork', polarity:'positive', subtypes:null },
+  { key:'shows_improvement', label:'Shows Improvement', polarity:'positive', subtypes:null },
+  { key:'called_on_correct', label:'Called on and answers correctly', polarity:'positive', subtypes:null },
+  // Negative
+  { key:'not_doing_classwork', label:'Not Doing Classwork', polarity:'negative', subtypes:null },
   { key:'arrives_late', label:'Arrives Late', polarity:'negative', subtypes:null },
-  { key:'absent', label:'Absent', polarity:'negative', subtypes:null },
-  { key:'sleeping', label:'Sleeping', polarity:'negative', subtypes:null },
-  { key:'not_doing_work', label:'Not Doing Work', polarity:'negative', subtypes:null },
-  { key:'disruptive', label:'Disruptive', polarity:'negative',
-    subtypes:[
-      {key:'chatting', label:'Chatting with Others'},
-      {key:'making_noise', label:'Making Noise'},
-      {key:'fiddling', label:'Fiddling'},
-      {key:'other', label:'Other'}
-    ]},
-  { key:'unprepared', label:'Unprepared for Class', polarity:'negative',
-    subtypes:[
-      {key:'no_materials', label:'No Materials'},
-      {key:'forgot_homework', label:'Forgot Homework'},
-      {key:'forgot_device', label:'Forgot Device'}
-    ]}
+  { key:'chatting', label:'Chatting', polarity:'negative', subtypes:null },
+  { key:'fiddling', label:'Fiddling', polarity:'negative', subtypes:null },
+  { key:'forgets_hw', label:'Forgets HW', polarity:'negative', subtypes:null },
+  { key:'forgets_device_materials', label:'Forgets Device or Materials', polarity:'negative', subtypes:null },
+  { key:'incomplete_work', label:'Incomplete Work', polarity:'negative', subtypes:null },
+  { key:'inactive', label:'Inactive', polarity:'negative', subtypes:null },
+  { key:'interrupts_calls_out', label:'Interrupts/Calls Out', polarity:'negative', subtypes:null },
+  { key:'rude_negative', label:'Rude/Negative', polarity:'negative', subtypes:null },
+  { key:'off_topic_response', label:'Off Topic Response', polarity:'negative', subtypes:null },
+  { key:'poor_logic_response', label:'Poor Logic Response', polarity:'negative', subtypes:null },
+  // Neutral
+  { key:'absent', label:'Absent', polarity:'neutral', subtypes:null },
+  { key:'visible_distress', label:'Visible Distress', polarity:'neutral', subtypes:null },
+  { key:'sleeping', label:'Sleeping', polarity:'neutral', subtypes:null }
 ];
+// The 3 categories that count as "answered" for the green checkmark and the Pick-a-Student
+// auto "called on" tag -- any of the three counts, so random-pick tracking keeps working
+// however the correct answer came about (raised hand, cold call, or the picker tool).
+const ANSWER_CATEGORY_KEYS = new Set(['raises_hand_correct','cold_call_correct','called_on_correct']);
 const REASON_TAGS = ['Great Insight','Helped a Classmate','Improved Effort','Strong Focus','Creative Thinking','Kindness'];
 const NO_ENTRIES_KEY = 'no_entries';
 const STUDENT_OF_CLASS_KEY = 'student_of_class';
@@ -660,12 +711,8 @@ function studentHeaderLabel(s){
 function eventSignedValue(e){
   if(e.category === STUDENT_OF_CLASS_KEY) return 1;
   if(e.category === NO_ENTRIES_KEY) return 0;
-  if(e.category === 'shares_idea'){
-    if(e.subtype === 'good_answer' || e.subtype === 'creative') return 1;
-    if(e.subtype === 'off_topic') return -1;
-    return 0; // poor_logic: neutral, still participating
-  }
   const cat = TAXONOMY.find(t=>t.key===e.category);
+  if(cat && cat.polarity === 'positive') return 1;
   if(cat && cat.polarity === 'negative') return -1;
   return 0;
 }
@@ -780,9 +827,50 @@ function normalizeHouseValue(v){
   return h ? h.key : null;
 }
 
+/* ---- Behavior taxonomy 2.0 migration: retired categories/subtypes -> their closest new
+   flat-category equivalent, so nothing already logged goes blank in reports once the old
+   TAXONOMY entries are gone. Keyed on "oldCategory|oldSubtype" (subtype 'null' for none). ---- */
+const LEGACY_SUBTYPE_MIGRATION = {
+  'shares_idea|creative': 'creative_ideas',
+  'shares_idea|poor_logic': 'poor_logic_response',
+  'shares_idea|off_topic': 'off_topic_response',
+  'disruptive|chatting': 'chatting',
+  'disruptive|making_noise': 'interrupts_calls_out',
+  'disruptive|fiddling': 'fiddling',
+  'disruptive|other': 'rude_negative',
+  'disruptive|null': 'rude_negative',
+  'unprepared|no_materials': 'forgets_device_materials',
+  'unprepared|forgot_homework': 'forgets_hw',
+  'unprepared|forgot_device': 'forgets_device_materials',
+  'unprepared|null': 'forgets_device_materials',
+  'not_doing_work|null': 'not_doing_classwork'
+};
+// Mutates ev in place; returns true if it changed anything. 'Shares Idea + Good Answer' is
+// handled separately from the plain lookup table above because its destination depends on
+// whether it was tagged as a called-on response (viaRandomPick) at the time it was logged.
+function migrateLegacyEventCategory(ev){
+  if(ev.category === 'shares_idea' && ev.subtype === 'good_answer'){
+    ev.category = ev.viaRandomPick ? 'called_on_correct' : 'raises_hand_correct';
+    ev.subtype = null;
+    return true;
+  }
+  const mapKey = ev.category + '|' + (ev.subtype || 'null');
+  const newKey = LEGACY_SUBTYPE_MIGRATION[mapKey];
+  if(newKey){
+    // None of the migrated categories still have a "called on" concept (that's now only
+    // tracked via the dedicated Called on and answers correctly category), so clear any
+    // stale flag rather than let an unrelated category show a "(called on)" label.
+    delete ev.viaRandomPick;
+    ev.category = newKey;
+    ev.subtype = null;
+    return true;
+  }
+  return false;
+}
+
 /* ============ INDEXEDDB LAYER ============ */
 const DB_NAME = 'classroomTrackerDB';
-const DB_VERSION = 3; // v3 adds the writing-assessment stores; existing stores are untouched on upgrade
+const DB_VERSION = 4; // v4 retires the old behavior taxonomy and migrates existing events onto the flat 2.0 categories
 
 function openDB(){
   if(openDB._p) return openDB._p;
@@ -825,6 +913,20 @@ function openDB(){
         const s = db.createObjectStore('writingFeedback', {keyPath:'id'});
         s.createIndex('assessmentId','assessmentId',{unique:false});
         s.createIndex('studentId','studentId',{unique:false});
+      }
+      // v4: rewrite every existing event still under a retired category/subtype onto its
+      // closest new flat-taxonomy key (see LEGACY_SUBTYPE_MIGRATION above), so historical
+      // Weekly Report / Data tab / export data keeps working under the 2.0 category list.
+      if(e.oldVersion > 0 && e.oldVersion < 4 && db.objectStoreNames.contains('events')){
+        const store = e.target.transaction.objectStore('events');
+        const cursorReq = store.openCursor();
+        cursorReq.onsuccess = (ce)=>{
+          const cursor = ce.target.result;
+          if(!cursor) return;
+          const ev = cursor.value;
+          if(migrateLegacyEventCategory(ev)) cursor.update(ev);
+          cursor.continue();
+        };
       }
     };
     req.onsuccess = (e)=> resolve(e.target.result);
@@ -1448,11 +1550,14 @@ async function renderClassHome(){
   return `
     <div class="topbar">
       <button class="btn ghost" id="back-to-list">&larr; All Classes</button>
-      <div class="row wrap">
-        <button class="btn small" id="edit-roster-btn">Edit Roster</button>
-        <button class="btn small" id="rename-class-btn">Rename Class</button>
-        <button class="btn small" id="archive-class-btn">${cls && cls.archived ? 'Unarchive Class' : 'Archive Class'}</button>
-        <button class="btn small danger" id="delete-class-btn">Delete Class</button>
+      <div class="menu-wrap">
+        <button class="btn small" id="class-menu-toggle">Manage Class &#9662;</button>
+        <div class="menu-panel" id="class-menu-panel" hidden>
+          <button class="menu-item" id="edit-roster-btn">Edit Roster</button>
+          <button class="menu-item" id="rename-class-btn">Rename Class</button>
+          <button class="menu-item" id="archive-class-btn">${cls && cls.archived ? 'Unarchive Class' : 'Archive Class'}</button>
+          <button class="menu-item danger" id="delete-class-btn">Delete Class</button>
+        </div>
       </div>
     </div>
     <h2>${escapeHtml(cls ? cls.name : '')}${cls && cls.archived ? ' <span class="muted" style="font-size:14px; font-weight:400;">(Archived)</span>' : ''}</h2>
@@ -1464,6 +1569,14 @@ function wireClassHome(){
   document.getElementById('back-to-list').addEventListener('click', ()=>{
     state.view='classList'; render();
   });
+  const classMenuToggle = document.getElementById('class-menu-toggle');
+  const classMenuPanel = document.getElementById('class-menu-panel');
+  if(classMenuToggle && classMenuPanel){
+    classMenuToggle.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      classMenuPanel.hidden = !classMenuPanel.hidden;
+    });
+  }
   document.getElementById('edit-roster-btn').addEventListener('click', ()=>{
     state.view='roster'; render();
   });
@@ -1533,7 +1646,7 @@ function studentGridHtml(students, eventCounts, answeredIds){
     const stripe = house ? `border-top-color:${house.color};` : '';
     return `
     <div class="student-btn" data-log-student="${s.id}" style="${stripe}">
-      ${eventCounts[s.id] ? `<div class="event-badge">${eventCounts[s.id]}</div>` : ''}
+      ${eventCounts[s.id] ? `<button class="event-badge" data-view-events="${s.id}" title="Tap to view or remove today's entries">${eventCounts[s.id]}</button>` : ''}
       ${answeredIds.has(s.id) ? `<div class="answered-badge" title="Already answered today">&#10003;</div>` : ''}
       <div class="student-avatar" style="background:${avatarColor(s)};">${escapeHtml(initials(s.name))}</div>
       <div class="student-name">${escapeHtml(s.name)}</div>
@@ -1552,7 +1665,7 @@ async function renderLogTab(todaySession){
   if(todaySession){
     const events = await dbGetAllByIndex('events','sessionId', todaySession.id);
     events.forEach(e=>{
-      if(e.category==='shares_idea') answeredIds.add(e.studentId);
+      if(ANSWER_CATEGORY_KEYS.has(e.category)) answeredIds.add(e.studentId);
       if(e.category===NO_ENTRIES_KEY) return;
       eventCounts[e.studentId] = (eventCounts[e.studentId]||0)+1;
     });
@@ -1683,6 +1796,53 @@ function wireLogTabEvents(){
       openEventModal(student);
     });
   });
+  document.querySelectorAll('[data-view-events]').forEach(el=>{
+    el.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      openTodayEventsModal(el.getAttribute('data-view-events'));
+    });
+  });
+}
+
+/* ---- Today's log for one student: view + remove accidental taps ---- */
+async function openTodayEventsModal(studentId){
+  const student = await dbGet('students', studentId);
+  const todaySession = await findTodaySession(state.currentClassId);
+  const events = todaySession
+    ? (await dbGetAllByIndex('events','sessionId', todaySession.id))
+        .filter(e=>e.studentId===studentId && e.category!==NO_ENTRIES_KEY)
+        .sort((a,b)=>b.timestamp-a.timestamp)
+    : [];
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'today-events-modal-backdrop';
+  const rowsHtml = events.map(e=>{
+    const time = new Date(e.timestamp).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+    return `
+    <div class="log-entry-row">
+      <span>${escapeHtml(rowLabel(e.category, e.subtype))}${e.viaRandomPick ? ' (called on)' : ''} <span class="muted">&middot; ${time}</span></span>
+      <button class="remove-entry-btn" data-remove-log-event="${e.id}" title="Remove this entry" aria-label="Remove this entry">&times;</button>
+    </div>`;
+  }).join('');
+  backdrop.innerHTML = `
+    <div class="modal">
+      <div class="modal-header">
+        <h3>${escapeHtml(student.name)} &mdash; Today's Log</h3>
+        <button class="icon-btn" id="close-today-events-modal">&times;</button>
+      </div>
+      ${rowsHtml || '<div class="empty">No entries logged today.</div>'}
+    </div>`;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#close-today-events-modal').addEventListener('click', ()=>backdrop.remove());
+  backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) backdrop.remove(); });
+  backdrop.querySelectorAll('[data-remove-log-event]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      await dbDelete('events', btn.getAttribute('data-remove-log-event'));
+      backdrop.remove();
+      toast('Entry removed', 'good');
+      render();
+    });
+  });
 }
 
 /* ---- Breakout Groups modal ---- */
@@ -1765,7 +1925,7 @@ async function handlePickRandomStudent(){
   if(todaySession){
     const events = await dbGetAllByIndex('events','sessionId', todaySession.id);
     events.forEach(e=>{
-      if(e.category==='shares_idea') answeredIds.add(e.studentId);
+      if(ANSWER_CATEGORY_KEYS.has(e.category)) answeredIds.add(e.studentId);
       if(e.category==='absent') absentIds.add(e.studentId);
     });
   }
@@ -1786,33 +1946,39 @@ async function handlePickRandomStudent(){
 }
 
 /* ---- Event logging modal ---- */
-function openEventModal(student, categoryKey){
-  const category = categoryKey ? TAXONOMY.find(t=>t.key===categoryKey) : null;
+// Tap-to-log picker (2.0): fixed, flat, no subtypes -- Positive/Negative render as two columns
+// side by side with a divider, Neutral renders as a row underneath. A single tap logs and closes.
+function openEventModal(student){
+  const positives = TAXONOMY.filter(t=>t.polarity==='positive');
+  const negatives = TAXONOMY.filter(t=>t.polarity==='negative');
+  const neutrals = TAXONOMY.filter(t=>t.polarity==='neutral');
+
+  const tile = (t) => `<button class="taxonomy-tile ${t.polarity}" data-cat="${t.key}">${escapeHtml(t.label)}</button>`;
+
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.id = 'event-modal-backdrop';
-
-  let bodyHtml;
-  if(!category){
-    bodyHtml = TAXONOMY.map(t=>`
-      <button class="cat-btn" data-cat="${t.key}">
-        ${escapeHtml(t.label)}
-        <span class="tag ${t.polarity}">${t.polarity}</span>
-      </button>
-    `).join('');
-  } else {
-    bodyHtml = category.subtypes.map(st=>`
-      <button class="cat-btn" data-sub="${st.key}">${escapeHtml(st.label)}</button>
-    `).join('') + `<button class="btn ghost" id="back-to-cats">&larr; Back</button>`;
-  }
-
   backdrop.innerHTML = `
-    <div class="modal">
+    <div class="modal modal-wide">
       <div class="modal-header">
-        <h3>${escapeHtml(student.name)}${category?(' &mdash; '+escapeHtml(category.label)):''}</h3>
+        <h3>${escapeHtml(student.name)}</h3>
         <button class="icon-btn" id="close-event-modal">&times;</button>
       </div>
-      ${bodyHtml}
+      <div class="taxonomy-picker">
+        <div class="taxonomy-col">
+          <div class="taxonomy-col-label positive">Positive</div>
+          ${positives.map(tile).join('')}
+        </div>
+        <div class="taxonomy-divider"></div>
+        <div class="taxonomy-col">
+          <div class="taxonomy-col-label negative">Negative</div>
+          ${negatives.map(tile).join('')}
+        </div>
+      </div>
+      <div class="taxonomy-neutral-row">
+        <div class="taxonomy-col-label neutral">Neutral</div>
+        <div class="taxonomy-neutral-tiles">${neutrals.map(tile).join('')}</div>
+      </div>
     </div>
   `;
   document.body.appendChild(backdrop);
@@ -1820,32 +1986,13 @@ function openEventModal(student, categoryKey){
   document.getElementById('close-event-modal').addEventListener('click', ()=>backdrop.remove());
   backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) backdrop.remove(); });
 
-  if(!category){
-    backdrop.querySelectorAll('[data-cat]').forEach(el=>{
-      el.addEventListener('click', ()=>{
-        const key = el.getAttribute('data-cat');
-        const cat = TAXONOMY.find(t=>t.key===key);
-        backdrop.remove();
-        if(cat.subtypes){
-          openEventModal(student, key);
-        } else {
-          logEvent(student, key, null);
-        }
-      });
-    });
-  } else {
-    backdrop.querySelectorAll('[data-sub]').forEach(el=>{
-      el.addEventListener('click', ()=>{
-        const subKey = el.getAttribute('data-sub');
-        backdrop.remove();
-        logEvent(student, category.key, subKey);
-      });
-    });
-    document.getElementById('back-to-cats').addEventListener('click', ()=>{
+  backdrop.querySelectorAll('[data-cat]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const key = el.getAttribute('data-cat');
       backdrop.remove();
-      openEventModal(student, null);
+      logEvent(student, key, null);
     });
-  }
+  });
 }
 
 async function logEvent(student, categoryKey, subKey, amount){
@@ -1862,7 +2009,7 @@ async function logEvent(student, categoryKey, subKey, amount){
     && state.lastPickedAt
     && (Date.now() - state.lastPickedAt) < CALLED_ON_WINDOW_MS;
   if(wasJustPicked){
-    if(categoryKey === 'shares_idea'){
+    if(ANSWER_CATEGORY_KEYS.has(categoryKey)){
       ev.viaRandomPick = true;
     }
     // Whether they answered or something else got logged for them, the "just picked"
@@ -2226,11 +2373,12 @@ async function computeWeeklyReport(classId, start, end){
       student: s,
       thisWeekNegByCategory:{}, thisWeekNegTotal:0,
       prevWeekNegByCategory:{}, prevWeekNegTotal:0,
-      thisWeekSharesIdeaCount:0, thisWeekSharesIdeaScore:0
+      thisWeekPositiveCount:0, thisWeekPositiveScore:0
     };
   });
 
   const negativeKeys = new Set(TAXONOMY.filter(t=>t.polarity==='negative').map(t=>t.key));
+  const positiveKeys = new Set(TAXONOMY.filter(t=>t.polarity==='positive').map(t=>t.key));
 
   events.forEach(e=>{
     const sess = sessionById[e.sessionId];
@@ -2242,9 +2390,9 @@ async function computeWeeklyReport(classId, start, end){
         rec.thisWeekNegByCategory[e.category] = (rec.thisWeekNegByCategory[e.category]||0)+1;
         rec.thisWeekNegTotal++;
       }
-      if(e.category==='shares_idea'){
-        rec.thisWeekSharesIdeaCount++;
-        rec.thisWeekSharesIdeaScore += eventSignedValue(e);
+      if(positiveKeys.has(e.category)){
+        rec.thisWeekPositiveCount++;
+        rec.thisWeekPositiveScore += eventSignedValue(e);
       }
     } else if(inRange(sess.date, prevStart, prevEnd)){
       if(negativeKeys.has(e.category)){
@@ -2256,9 +2404,9 @@ async function computeWeeklyReport(classId, start, end){
 
   // Top 3 Performers: clean behavior this week AND actually participated (silence doesn't count as good).
   const performers = Object.values(perStudent)
-    .filter(r=> r.thisWeekNegTotal===0 && r.thisWeekSharesIdeaCount>0)
-    .sort((a,b)=> b.thisWeekSharesIdeaScore - a.thisWeekSharesIdeaScore
-                || b.thisWeekSharesIdeaCount - a.thisWeekSharesIdeaCount
+    .filter(r=> r.thisWeekNegTotal===0 && r.thisWeekPositiveCount>0)
+    .sort((a,b)=> b.thisWeekPositiveScore - a.thisWeekPositiveScore
+                || b.thisWeekPositiveCount - a.thisWeekPositiveCount
                 || a.student.name.localeCompare(b.student.name))
     .slice(0,3);
 
@@ -2316,7 +2464,7 @@ async function renderReportTab(){
             <strong>${i+1}. ${escapeHtml(r.student.name)}</strong>
             <span class="tag positive">Clean week</span>
           </div>
-          <div class="muted" style="margin-top:4px;">${r.thisWeekSharesIdeaCount} contribution${r.thisWeekSharesIdeaCount===1?'':'s'} this week, no behavior entries logged</div>
+          <div class="muted" style="margin-top:4px;">${r.thisWeekPositiveCount} contribution${r.thisWeekPositiveCount===1?'':'s'} this week, no behavior entries logged</div>
         </div>`).join('')
     : `<div class="empty">No student fully met the bar this week (clean behavior + at least one contribution).</div>`;
 
@@ -3731,8 +3879,11 @@ async function openManageWritingEntriesModal(polarity, skillKey){
     const criteriaLabel = (e.criteriaCodes && e.criteriaCodes.length) ? `<div class="muted" style="margin-top:2px;">Tagged to: ${e.criteriaCodes.map(escapeHtml).join(', ')}</div>` : '';
     return `
     <div class="row between" style="padding:8px 0; border-bottom:1px solid var(--line);">
-      <span>${i+1}. ${e.quote ? `&ldquo;${escapeHtml(e.quote)}&rdquo;` : '<span class="muted">(no excerpt)</span>'}${criteriaLabel}</span>
-      <button class="btn small danger" data-remove-entry="${e.id}">Remove</button>
+      <span>${i+1}. ${e.quote ? `&ldquo;${escapeHtml(e.quote)}&rdquo;` : '<span class="muted">(no excerpt &mdash; tap Add Quote)</span>'}${criteriaLabel}</span>
+      <span class="row" style="gap:6px; flex-shrink:0;">
+        <button class="btn small" data-edit-entry="${e.id}">${e.quote ? 'Edit' : 'Add Quote'}</button>
+        <button class="btn small danger" data-remove-entry="${e.id}">Remove</button>
+      </span>
     </div>`;
   }).join('');
   backdrop.innerHTML = `
@@ -3751,6 +3902,47 @@ async function openManageWritingEntriesModal(polarity, skillKey){
       backdrop.remove();
       render();
     });
+  });
+  backdrop.querySelectorAll('[data-edit-entry]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const entryId = btn.getAttribute('data-edit-entry');
+      const entry = events.find(e=>e.id===entryId);
+      backdrop.remove();
+      openWritingQuoteModal(writingSkillLabel(polarity, skillKey, assessment), (entry && entry.quote) || '', async (quote)=>{
+        entry.quote = quote;
+        await dbPut('writingEvents', entry);
+        openManageWritingEntriesModal(polarity, skillKey);
+      });
+    });
+  });
+}
+
+// Small reusable modal for adding/editing the optional quote text on a writing-skill tap --
+// used both for the initial tap (replacing a flaky native prompt()) and for going back to
+// add/fix a quote on an entry that was saved without one.
+function openWritingQuoteModal(skillLabel, initialQuote, onSave){
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'wa-quote-modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal">
+      <div class="modal-header">
+        <h3>${escapeHtml(skillLabel)}</h3>
+        <button class="icon-btn" id="close-wa-quote-modal">&times;</button>
+      </div>
+      <div class="field">
+        <label>Quote the specific word, phrase, or sentence (optional)</label>
+        <textarea id="wa-quote-input" placeholder="e.g. &quot;the ending felt rushed...&quot;">${escapeHtml(initialQuote || '')}</textarea>
+      </div>
+      <button class="btn primary block" id="wa-quote-save-btn">Save</button>
+    </div>`;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#close-wa-quote-modal').addEventListener('click', ()=>backdrop.remove());
+  backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) backdrop.remove(); });
+  backdrop.querySelector('#wa-quote-save-btn').addEventListener('click', ()=>{
+    const quote = backdrop.querySelector('#wa-quote-input').value.trim();
+    backdrop.remove();
+    onSave(quote || null);
   });
 }
 
@@ -3969,13 +4161,15 @@ function wireWritingTabEvents(){
         await openCriteriaTapModal(assessment, polarity, skillKey);
         return;
       }
-      const quote = window.prompt('Quote the specific word, phrase, or sentence (optional) — Cancel to skip:');
-      await dbAdd('writingEvents', {
-        id: uuid(), assessmentId: state.writingSelectedAssessmentId, classId: state.currentClassId,
-        studentId: state.writingSelectedStudentId, polarity, skillKey,
-        quote: (quote && quote.trim()) ? quote.trim() : null, timestamp: Date.now()
+      const assessment = await dbGet('writingAssessments', state.writingSelectedAssessmentId);
+      openWritingQuoteModal(writingSkillLabel(polarity, skillKey, assessment), '', async (quote)=>{
+        await dbAdd('writingEvents', {
+          id: uuid(), assessmentId: state.writingSelectedAssessmentId, classId: state.currentClassId,
+          studentId: state.writingSelectedStudentId, polarity, skillKey,
+          quote, timestamp: Date.now()
+        });
+        render();
       });
-      render();
     });
   });
 
