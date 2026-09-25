@@ -164,6 +164,15 @@
     font-size:14px; font-weight:600; cursor:pointer; margin:0 8px 8px 0;
   }
   .chip.selected{background:var(--accent); color:#fff; border-color:var(--accent);}
+  /* Tree Logic (I&S / Language and Literature MYP writing feedback): 4-level chips colored
+     Red/Orange/Yellow/Green so the color itself communicates achievement, matching Mike's sketch. */
+  .tree-chip-row{display:flex; flex-wrap:wrap; gap:6px;}
+  .tree-chip{
+    display:inline-flex; padding:7px 12px; border-radius:16px; border:2px solid var(--tree-color);
+    color:var(--tree-color); background:#fff; font-size:12.5px; font-weight:600; cursor:pointer;
+  }
+  .tree-chip.selected{background:var(--tree-color); color:#fff;}
+  .tree-section-header{cursor:pointer; padding:4px 0;}
   .toast-root{position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:100; display:flex; flex-direction:column; gap:8px; align-items:center;}
   .toast{background:var(--ink); color:#fff; padding:10px 18px; border-radius:30px; font-size:14px; font-weight:600; box-shadow:0 6px 20px rgba(0,0,0,0.2); animation:fade .25s ease-out;}
   .toast.good{background:var(--good);}
@@ -603,10 +612,90 @@ const IS_CRITERIA_YEAR5 = [
   ]}
 ];
 const IS_MYP_YEARS = ['Year 1 (G6-7)', 'Year 3 (G8-9)', 'Year 5 (G10)'];
+// Task types Mike sketched out for the I&S "Tree Logic" feedback tool. Argumentative Essay is
+// the only one with its own built tree so far; every task type here shares that same tree until
+// each gets its own custom build later (Mike's explicit call -- "everything will use this in I&S").
 const IS_WRITING_TYPES = [
-  'Argumentative Essay', 'Compare and Contrast', 'OPCVL Analysis Paper',
-  'Proposal', 'Reflective Writing', 'Research Justification'
+  'Argumentative Essay', 'OPCVL Essay', 'RQ Justification',
+  'Oral Interview', 'Reflection Essay', 'Report'
 ];
+// Language and Literature MYP (what Mike calls "English Lit MYP" in conversation) gets a much
+// simpler task-type list for now -- just the 4 papers, renameable later once he's organized them.
+const LANG_LIT_MYP_PAPERS = ['Paper 1', 'Paper 2', 'Paper 3', 'Paper 4'];
+// Purely descriptive metadata picked at assessment-creation time -- does NOT change which fields
+// show up in the Tree Logic editor (paragraph count is its own live toggle in the Body section).
+// Free-text "Other" fallback since some tasks (OPCVL, Proposal) may need a custom length later.
+const RESPONSE_LENGTH_OPTIONS = ['Standard (3-5 Paragraphs)', 'Long Response', 'Other'];
+
+/* ============ WRITING ASSESSMENT: "Tree Logic" feedback tool (I&S MYP + Language and Literature MYP) ============
+   Replaces the flat two-column positive/negative skill list for these two subjects, for every
+   task type, regardless of scoring method (BE/AE/ME/EE, Criteria, Comments-only) -- Mike's call:
+   the flat list "is not comprehensive while also being sloppy". Structured instead as four
+   sections (Intro/Body/Conclusion/Overall) read top to bottom, each line item rated at one of 4
+   achievement levels (color-coded Red/Orange/Yellow/Green so color still communicates
+   achievement), with an optional per-item tag for which Criteria/strand it applies to (teacher's
+   choice each time, since task-specific items change per task). Body is special: paragraph count
+   is a live toggle, and each paragraph tracks its own independent set of 5 ratings (Point,
+   Evidence, Analysis, Link, and the holistic PEEL(A)L) -- one weak paragraph in an otherwise
+   strong argument is exactly the kind of thing this is meant to surface, not average away. */
+const TREE_LOGIC_LEVEL_COLORS = ['#c0392b', '#d9822b', '#c9a227', '#2f9e5f']; // red / orange / yellow / green
+const TREE_LOGIC_SCHEMA = {
+  intro: {
+    label: 'Intro',
+    items: {
+      point: { label: 'Point', levels: ['No Opening Point', 'Weak Point', 'Solid Point', 'Great Point'] },
+      context: { label: 'Establishes Context / Debate', levels: ['Does Not Establish', 'Somewhat Establishes', 'Mostly Establishes', 'Clearly Established'] },
+      thesis: { label: 'Thesis', levels: ['No Thesis', 'Weak / Confusing / Poorly Placed', 'Solid Thesis', 'Strong Thesis'] }
+    },
+    hasOther: true
+  },
+  body: {
+    label: 'Body',
+    perParagraphItems: {
+      point: { label: 'Point', levels: ['No Point Given', 'Confusing / Weak Point', 'Point Given', 'Strong Point Given'] },
+      evidence: { label: 'Example / Evidence / Quote', levels: ['No Evidence Given', 'Evidence Given', 'Suitable Evidence Given', 'Strong Evidence Given'] },
+      analysis: { label: 'Explanation / Analysis', levels: ['No Analysis Given', 'Illogical / Weak / Confusing Analysis', 'Basic Analysis Given', 'Deep / Strong Analysis Given'] },
+      link: { label: 'Link Back to Thesis', levels: ['No Link to Thesis', 'Weak Link to Thesis', 'Links to Thesis', 'Strong Link to Thesis'], skippable: true },
+      peel: { label: 'PEEL(A)L (paragraph as a whole)', levels: ['PEEL Not Used', 'PEEL Somewhat Used', 'PEEL Used', 'Strong Use of PEEL'] }
+    }
+  },
+  conclusion: {
+    label: 'Conclusion',
+    items: {
+      conclusion: { label: 'Conclusion', levels: ['No Conclusion', 'Weak or Confusing Conclusion', 'Solid Conclusion', 'Strong Conclusion'] }
+    },
+    skippable: true
+  },
+  overall: {
+    label: 'Overall',
+    items: {
+      argument: { label: 'Argument', levels: ['Inconsistent', 'Somewhat Consistent', 'Mostly Consistent', 'Consistent'] },
+      organization: { label: 'Organization', levels: ['Poorly Organized', 'Somewhat Organized', 'Mostly Organized', 'Strongly Organized'] },
+      comprehension: { label: 'Comprehension / Understanding', levels: ['Weak (BE)', 'Approaching Expectations (AE)', 'Meeting Expectations (ME)', 'Exceeding Expectations (EE)'] },
+      grammar: { label: 'Grammar & Writing', levels: ['BE', 'AE', 'ME', 'EE'] }
+    }
+  }
+};
+function usesTreeLogic(assessment){
+  return !!(assessment && (assessment.subject === 'Individuals and Societies MYP' || assessment.subject === 'Language and Literature MYP'));
+}
+// Lazily fills in feedback.tree the first time it's needed, so older feedback records (or ones
+// never opened yet) get a valid shape without a migration pass.
+function ensureTreeLogicShape(feedback){
+  if(feedback.tree) return feedback.tree;
+  feedback.tree = {
+    intro: { point: null, context: null, thesis: null, other: '', criteria: { point:[], context:[], thesis:[] } },
+    body: { paragraphs: [ newTreeParagraph() ] },
+    conclusion: { level: null, skipped: false, criteria: { level: [] } },
+    overall: { argument: null, organization: null, comprehension: null, grammar: null,
+      criteria: { argument:[], organization:[], comprehension:[], grammar:[] } }
+  };
+  return feedback.tree;
+}
+function newTreeParagraph(){
+  return { point: null, evidence: null, analysis: null, link: null, linkSkipped: false, peel: null,
+    criteria: { point:[], evidence:[], analysis:[], link:[], peel:[] } };
+}
 function isISAssessment(assessment){
   return !!(assessment && assessment.subject === 'Individuals and Societies MYP' && assessment.subjectMeta && assessment.subjectMeta.mypYear);
 }
@@ -630,6 +719,9 @@ function writingAssessmentMetaLabel(assessment){
   }
   if(isISAssessment(assessment)){
     return escapeHtml(assessment.subjectMeta.mypYear||'');
+  }
+  if(assessment && assessment.subject === 'Language and Literature MYP'){
+    return escapeHtml(assessment.writingType||'');
   }
   return '';
 }
@@ -2997,8 +3089,155 @@ async function computeClassWritingAggregate(classId, assessmentId){
   };
 }
 
+/* ============ WRITING ASSESSMENT: Tree Logic rendering (I&S MYP + Language and Literature MYP) ============ */
+function treeLevelChipsHtml(section, itemKey, levels, currentLevel, pIdx){
+  const pAttr = (pIdx!=null) ? ` data-tree-paragraph="${pIdx}"` : '';
+  const chips = levels.map((label,i)=>`
+    <span class="tree-chip ${currentLevel===i?'selected':''}" style="--tree-color:${TREE_LOGIC_LEVEL_COLORS[i]};" data-tree-section="${section}" data-tree-item="${itemKey}"${pAttr} data-tree-value="${i}">${escapeHtml(label)}</span>`).join('');
+  return `<div class="tree-chip-row">${chips}</div>`;
+}
+function treeSectionHeaderHtml(key, label){
+  const open = state.writingTreeOpenSections[key];
+  return `<div class="row between tree-section-header" data-tree-toggle-section="${key}">
+    <h4 style="margin:0;">${escapeHtml(label)}</h4>
+    <span class="muted">${open?'&minus; Hide':'+ Show'}</span>
+  </div>`;
+}
+function renderTreeLogicEditorHtml(assessment, feedback){
+  const tree = ensureTreeLogicShape(feedback);
+  const hasCriteriaTags = !!(assessment.subjectMeta && assessment.subjectMeta.criteria && assessment.subjectMeta.criteria.length);
+  if(!state.writingTreeOpenSections) state.writingTreeOpenSections = { intro:true, body:true, conclusion:true, overall:true };
+  const open = state.writingTreeOpenSections;
+  if(state.writingTreeActiveParagraph == null) state.writingTreeActiveParagraph = 0;
+  if(state.writingTreeActiveParagraph >= tree.body.paragraphs.length) state.writingTreeActiveParagraph = tree.body.paragraphs.length - 1;
+  const activeP = state.writingTreeActiveParagraph;
+
+  const criteriaTagBtnHtml = (section, item, pIdx) => hasCriteriaTags
+    ? `<span class="btn small ghost" style="padding:2px 8px; font-size:11px;" data-tree-criteria-tag="${section}" data-tree-criteria-item="${item}" data-tree-criteria-paragraph="${pIdx!=null?pIdx:''}">Tag Criteria</span>`
+    : '';
+  const itemBlockHtml = (schemaItem, key, section, currentLevel, pIdx) => `
+    <div class="card" style="margin-top:8px;">
+      <div class="row between" style="align-items:flex-start;">
+        <strong>${escapeHtml(schemaItem.label)}</strong>
+        ${criteriaTagBtnHtml(section, key, pIdx)}
+      </div>
+      <div style="margin-top:6px;">${treeLevelChipsHtml(section, key, schemaItem.levels, currentLevel, pIdx)}</div>
+    </div>`;
+
+  // ---- Intro ----
+  const introItemsHtml = Object.entries(TREE_LOGIC_SCHEMA.intro.items).map(([key,item])=>
+    itemBlockHtml(item, key, 'intro', tree.intro[key], null)
+  ).join('') + `
+    <div class="card" style="margin-top:8px;">
+      <strong>Other</strong>
+      <textarea id="tree-intro-other" placeholder="Any other intro feedback...">${escapeHtml(tree.intro.other||'')}</textarea>
+    </div>`;
+
+  // ---- Body: paragraph-count toggle + a left-side ¶ switch, like tabs, so one weak paragraph
+  // in an otherwise strong essay shows up rather than getting averaged away. ----
+  const pCount = tree.body.paragraphs.length;
+  const tabsHtml = tree.body.paragraphs.map((_,i)=>`
+    <span class="chip ${activeP===i?'selected':''}" data-tree-active-paragraph="${i}">&para;${i+1}</span>`).join('');
+  const p = tree.body.paragraphs[activeP];
+  const bodyItemsHtml = Object.entries(TREE_LOGIC_SCHEMA.body.perParagraphItems).map(([key,item])=>{
+    if(item.skippable){
+      const skipped = p.linkSkipped;
+      return `
+        <div class="card" style="margin-top:8px;">
+          <div class="row between" style="align-items:flex-start;">
+            <strong>${escapeHtml(item.label)}</strong>
+            <span class="row" style="gap:6px;">
+              ${criteriaTagBtnHtml('body', key, activeP)}
+              <span class="btn small ghost" data-tree-link-skip="${activeP}">${skipped?'N/A (tap to re-enable)':'Mark N/A'}</span>
+            </span>
+          </div>
+          ${skipped ? '<div class="muted" style="margin-top:6px;">Marked not applicable for this paragraph.</div>' : `<div style="margin-top:6px;">${treeLevelChipsHtml('body', key, item.levels, p[key], activeP)}</div>`}
+        </div>`;
+    }
+    return itemBlockHtml(item, key, 'body', p[key], activeP);
+  }).join('');
+  const bodyHtml = `
+    <div class="row between" style="align-items:center; margin-bottom:8px;">
+      <div class="muted">Body Paragraphs</div>
+      <div class="row" style="gap:8px; align-items:center;">
+        <span class="btn small ghost" data-tree-paragraph-count-delta="-1">&minus;</span>
+        <span>${pCount}</span>
+        <span class="btn small ghost" data-tree-paragraph-count-delta="1">+</span>
+      </div>
+    </div>
+    <div class="tree-chip-row" style="margin-bottom:8px;">${tabsHtml}</div>
+    ${bodyItemsHtml}`;
+
+  // ---- Conclusion ----
+  const cSkipped = tree.conclusion.skipped;
+  const conclusionHtml = `
+    <div class="row" style="margin-bottom:8px;">
+      <span class="btn small ghost" data-tree-conclusion-skip="1">${cSkipped?'Not Applicable (tap to re-enable)':'Mark Not Applicable'}</span>
+    </div>
+    ${cSkipped ? '<div class="muted">Marked not applicable for this task.</div>' : itemBlockHtml(TREE_LOGIC_SCHEMA.conclusion.items.conclusion, 'level', 'conclusion', tree.conclusion.level, null)}`;
+
+  // ---- Overall ----
+  const overallHtml = Object.entries(TREE_LOGIC_SCHEMA.overall.items).map(([key,item])=>
+    itemBlockHtml(item, key, 'overall', tree.overall[key], null)
+  ).join('');
+
+  const sectionHtml = (key, label, bodyContent) => `
+    <div class="card" style="margin-top:10px;">
+      ${treeSectionHeaderHtml(key, label)}
+      ${open[key] ? bodyContent : ''}
+    </div>`;
+
+  return `
+    <div style="margin-top:14px;">
+      ${sectionHtml('intro', 'Intro', introItemsHtml)}
+      ${sectionHtml('body', 'Body', bodyHtml)}
+      ${sectionHtml('conclusion', 'Conclusion', conclusionHtml)}
+      ${sectionHtml('overall', 'Overall', overallHtml)}
+    </div>`;
+}
+// Report view: walks the same schema and shows only what was actually rated, section by
+// section, with the plain-language level text (not just a color) plus any Criteria tags.
+function writingTreeReportContentHtml(assessment, student, feedback, tally){
+  const tree = ensureTreeLogicShape(feedback);
+  const criteriaByCode = {};
+  ((assessment.subjectMeta && assessment.subjectMeta.criteria) || []).forEach(c=> criteriaByCode[c.code]=c.label);
+  const criteriaTagHtml = (criteriaMap, key) => {
+    const codes = criteriaMap && criteriaMap[key];
+    if(!codes || !codes.length) return '';
+    return `<span class="muted"> &middot; ${codes.map(code=>escapeHtml(criteriaByCode[code]?`${code}`:code)).join(', ')}</span>`;
+  };
+  const itemLineHtml = (schemaItem, key, target) => {
+    const level = target[key];
+    if(level == null) return '';
+    return `<div style="margin-bottom:4px;"><strong>${escapeHtml(schemaItem.label)}:</strong> ${escapeHtml(schemaItem.levels[level])}${criteriaTagHtml(target.criteria, key)}</div>`;
+  };
+  const introHtml = Object.entries(TREE_LOGIC_SCHEMA.intro.items).map(([key,item])=> itemLineHtml(item, key, tree.intro)).join('')
+    + (tree.intro.other ? `<div style="margin-bottom:4px;"><strong>Other:</strong> ${escapeHtml(tree.intro.other)}</div>` : '');
+  const bodyHtml = tree.body.paragraphs.map((p,i)=>{
+    const lines = Object.entries(TREE_LOGIC_SCHEMA.body.perParagraphItems).map(([key,item])=>{
+      if(item.skippable && p.linkSkipped) return `<div style="margin-bottom:4px;"><strong>${escapeHtml(item.label)}:</strong> <span class="muted">Not Applicable</span></div>`;
+      return itemLineHtml(item, key, p);
+    }).join('');
+    return lines.trim() ? `<div style="margin:8px 0; padding-top:8px; border-top:1px solid var(--line);"><em>Paragraph ${i+1}</em>${lines}</div>` : '';
+  }).join('');
+  const conclusionHtml = tree.conclusion.skipped
+    ? '<div class="muted">Not Applicable</div>'
+    : itemLineHtml(TREE_LOGIC_SCHEMA.conclusion.items.conclusion, 'level', tree.conclusion);
+  const overallHtml = Object.entries(TREE_LOGIC_SCHEMA.overall.items).map(([key,item])=> itemLineHtml(item, key, tree.overall)).join('');
+  return `
+    <h3>${escapeHtml(assessment.title)}</h3>
+    <div class="muted" style="margin-bottom:10px;">${escapeHtml(student.name)} &middot; Due ${formatDateNice(assessment.dueDate)}</div>
+    ${assessment.prompt ? `<div class="card" style="margin-bottom:14px;"><em>${escapeHtml(assessment.prompt)}</em></div>` : ''}
+    ${introHtml ? `<h4>Intro</h4>${introHtml}` : ''}
+    ${bodyHtml.trim() ? `<h4 style="margin-top:12px;">Body</h4>${bodyHtml}` : ''}
+    ${conclusionHtml ? `<h4 style="margin-top:12px;">Conclusion</h4>${conclusionHtml}` : ''}
+    ${overallHtml ? `<h4 style="margin-top:12px;">Overall</h4>${overallHtml}` : ''}
+    ${feedback.comment ? `<h4 style="margin-top:16px;">Comments</h4><p>${escapeHtml(feedback.comment)}</p>` : ''}
+  `;
+}
 /* ============ WRITING ASSESSMENT: rendering ============ */
 function writingReportContentHtml(assessment, student, feedback, tally){
+  if(usesTreeLogic(assessment)) return writingTreeReportContentHtml(assessment, student, feedback, tally);
   if(hasCriteriaFlow(assessment)) return writingCriteriaReportContentHtml(assessment, student, feedback, tally);
   const renderBucket = (bucket, polarity) => {
     const keys = Object.keys(bucket);
@@ -3454,6 +3693,25 @@ async function renderWritingStudentPage(assessmentId, studentId){
     return `${backBtn}<div class="card" style="margin-top:10px;">${writingReportContentHtml(assessment, student, feedback, tally)}</div>${actionsHtml}`;
   }
 
+  // Tree Logic (I&S MYP + Language and Literature MYP) fully replaces the flat skill-tap list
+  // and the plain score chips below -- Overall already carries Comprehension/Grammar levels --
+  // regardless of which scoring method was picked at creation (Criteria selections still feed
+  // the optional per-item "Tag Criteria" buttons inside the tree).
+  if(usesTreeLogic(assessment)){
+    return `
+      ${backBtn}
+      <h3 style="margin-top:10px;">${escapeHtml(student.name)}</h3>
+      <div class="muted" style="margin-bottom:14px;">${escapeHtml(assessment.title)} &middot; Due ${formatDateNice(assessment.dueDate)}</div>
+      ${assessment.prompt ? `<div class="card"><em>${escapeHtml(assessment.prompt)}</em></div>` : ''}
+      ${renderTreeLogicEditorHtml(assessment, feedback)}
+      <div class="field" style="margin-top:16px;">
+        <label>Comments (optional)</label>
+        <textarea id="wa-comment-input" placeholder="Summarize the issues or highlights...">${escapeHtml(feedback.comment||'')}</textarea>
+      </div>
+      <button class="btn primary block" id="wa-review-btn" style="margin-top:10px;">Review</button>
+    `;
+  }
+
   const hasCriteria = hasCriteriaFlow(assessment);
   const negSkills = writingNegSkillsForAssessment(assessment);
   const posSkills = writingPosSkillsForAssessment(assessment);
@@ -3544,6 +3802,7 @@ async function openWritingAssessmentWizard(){
     subject: null, litPaper: null, litLevel: null, mypYear: null, isMethod: null,
     title:'', type:'formative', mode:'in_class_timed', dueDate: todayStr(),
     writingType: WRITING_TYPES[0], writingTypeOther:'', litWritingTypeText:'', methods:[], prompt:'', promptNA:false,
+    responseLength: RESPONSE_LENGTH_OPTIONS[0], responseLengthOther:'',
     criteria: null // lazily built from LIT_CRITERIA_PAPER1/2 or IS_CRITERIA_YEARx once known
   };
   const backdrop = document.createElement('div');
@@ -3551,6 +3810,10 @@ async function openWritingAssessmentWizard(){
   backdrop.id = 'wa-wizard-backdrop';
   const isLit = ()=> draft.subject === 'Eng Lit DP';
   const isIS = ()=> draft.subject === 'Individuals and Societies MYP';
+  // "English Lit MYP" in Mike's own words -- Language and Literature MYP is the official subject
+  // name already sitting in SUBJECTS. It gets the same Tree Logic tool as I&S, just with a much
+  // simpler task-type list (Paper 1-4, renameable later) and no Criteria/method step at all.
+  const isLangLit = ()=> draft.subject === 'Language and Literature MYP';
   // I&S is the only subject with a choice of assessment approach: Criteria is the only one that
   // needs the Year/Criteria/Strand steps -- BE/AE/ME/EE and Comments-only behave like any other
   // non-criteria subject (general skill taxonomy, plain score field or none at all).
@@ -3561,6 +3824,7 @@ async function openWritingAssessmentWizard(){
     const dueEl = backdrop.querySelector('#wa-due-date'); if(dueEl) draft.dueDate = dueEl.value;
     const otherEl = backdrop.querySelector('#wa-writing-type-other'); if(otherEl) draft.writingTypeOther = otherEl.value;
     const litTypeEl = backdrop.querySelector('#wa-lit-writing-type'); if(litTypeEl) draft.litWritingTypeText = litTypeEl.value;
+    const respLenOtherEl = backdrop.querySelector('#wa-response-length-other'); if(respLenOtherEl) draft.responseLengthOther = respLenOtherEl.value;
     const promptEl = backdrop.querySelector('#wa-prompt'); if(promptEl && !draft.promptNA) draft.prompt = promptEl.value;
   }
 
@@ -3614,8 +3878,41 @@ async function openWritingAssessmentWizard(){
       if(!draft.subject){ toast('Please choose a subject'); return; }
       if(isLit()) renderLitPaperLevelStep();
       else if(isIS()) renderISMethodStep();
+      else if(isLangLit()) renderLangLitPaperStep();
       else renderForm();
     });
+  }
+
+  /* ---- Step 0b (Language and Literature MYP only): which paper -- fixed Tree Logic tool,
+     no method/Criteria choice needed here. ---- */
+  function renderLangLitPaperStep(){
+    if(!LANG_LIT_MYP_PAPERS.includes(draft.writingType)) draft.writingType = LANG_LIT_MYP_PAPERS[0];
+    backdrop.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Language and Literature MYP</h3>
+          <button class="icon-btn" id="close-wa-wizard">&times;</button>
+        </div>
+        <div class="field">
+          <label>Assessment Type</label>
+          <div>${LANG_LIT_MYP_PAPERS.map(p=>`<span class="chip ${draft.writingType===p?'selected':''}" data-wa-lang-lit-paper="${escapeHtml(p)}">${escapeHtml(p)}</span>`).join('')}</div>
+          <div class="muted" style="margin-top:6px;">You can rename these later.</div>
+        </div>
+        <div class="row" style="margin-top:14px;">
+          <button class="btn ghost" id="wa-lang-lit-back-btn">&larr; Back</button>
+          <button class="btn primary" id="wa-lang-lit-next-btn">Next</button>
+        </div>
+      </div>
+    `;
+    backdrop.querySelector('#close-wa-wizard').addEventListener('click', ()=>backdrop.remove());
+    backdrop.querySelectorAll('[data-wa-lang-lit-paper]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        draft.writingType = el.getAttribute('data-wa-lang-lit-paper');
+        renderLangLitPaperStep();
+      });
+    });
+    backdrop.querySelector('#wa-lang-lit-back-btn').addEventListener('click', ()=> renderSubjectStep());
+    backdrop.querySelector('#wa-lang-lit-next-btn').addEventListener('click', ()=> renderForm());
   }
 
   /* ---- Step 0b (I&S MYP only): how will this be assessed? Only "Criteria" leads into the
@@ -3750,7 +4047,7 @@ async function openWritingAssessmentWizard(){
           <h3>Add Writing Assessment</h3>
           <button class="icon-btn" id="close-wa-wizard">&times;</button>
         </div>
-        <div class="muted" style="margin-bottom:10px;">${escapeHtml(draft.subject)}${isLit() ? ` &middot; ${draft.litPaper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(draft.litLevel)}` : ''}${isIS() && draft.mypYear ? ` &middot; ${escapeHtml(draft.mypYear)}` : ''}</div>
+        <div class="muted" style="margin-bottom:10px;">${escapeHtml(draft.subject)}${isLit() ? ` &middot; ${draft.litPaper==='paper2'?'Paper 2':'Paper 1'} &middot; ${escapeHtml(draft.litLevel)}` : ''}${isIS() && draft.mypYear ? ` &middot; ${escapeHtml(draft.mypYear)}` : ''}${isLangLit() ? ` &middot; ${escapeHtml(draft.writingType)}` : ''}</div>
         <div class="field">
           <label>Title</label>
           <input type="text" id="wa-title" placeholder="e.g. Unseen Poetry Analysis" value="${escapeHtml(draft.title)}">
@@ -3781,7 +4078,7 @@ async function openWritingAssessmentWizard(){
         <div class="field">
           <label>Writing Type</label>
           <div>${IS_WRITING_TYPES.map(t=>`<span class="chip ${draft.writingType===t?'selected':''}" data-wa-field="writingType" data-wa-val="${escapeHtml(t)}">${escapeHtml(t)}</span>`).join('')}</div>
-        </div>` : `
+        </div>` : isLangLit() ? '' : `
         <div class="field">
           <label>Writing Type</label>
           <div>${WRITING_TYPES.map(t=>`<span class="chip ${draft.writingType===t?'selected':''}" data-wa-field="writingType" data-wa-val="${escapeHtml(t)}">${escapeHtml(t)}</span>`).join('')}</div>
@@ -3791,9 +4088,16 @@ async function openWritingAssessmentWizard(){
           <label>How will it be assessed? (select all that apply)</label>
           <div>${WRITING_ASSESSMENT_METHODS.map(m=>`<span class="chip ${draft.methods.includes(m.key)?'selected':''}" data-wa-method="${m.key}">${escapeHtml(m.label)}</span>`).join('')}</div>
         </div>`}
+        ${(isIS()||isLangLit()) ? `
         <div class="field">
-          <label>${(isLit()||isIS()) ? 'Describe the Task' : 'Essay Prompt / Question'}</label>
-          <textarea id="wa-prompt" placeholder="${(isLit()||isIS()) ? 'Describe the task in a clear and relevant way...' : 'Paste or type the prompt...'}" ${draft.promptNA?'disabled':''}>${draft.promptNA ? '' : escapeHtml(draft.prompt)}</textarea>
+          <label>Response Length (reference only)</label>
+          <div>${RESPONSE_LENGTH_OPTIONS.map(o=>`<span class="chip ${draft.responseLength===o?'selected':''}" data-wa-field="responseLength" data-wa-val="${escapeHtml(o)}">${escapeHtml(o)}</span>`).join('')}</div>
+          ${draft.responseLength==='Other' ? `<input type="text" id="wa-response-length-other" placeholder="Describe the expected length" value="${escapeHtml(draft.responseLengthOther)}" style="margin-top:8px;">` : ''}
+          <div class="muted" style="margin-top:6px;">Just for reference when giving feedback -- doesn't change which fields show up below.</div>
+        </div>` : ''}
+        <div class="field">
+          <label>${(isLit()||isIS()||isLangLit()) ? 'Describe the Task' : 'Essay Prompt / Question'}</label>
+          <textarea id="wa-prompt" placeholder="${(isLit()||isIS()||isLangLit()) ? 'Describe the task in a clear and relevant way...' : 'Paste or type the prompt...'}" ${draft.promptNA?'disabled':''}>${draft.promptNA ? '' : escapeHtml(draft.prompt)}</textarea>
           <div style="margin-top:6px;"><span class="chip ${draft.promptNA?'selected':''}" id="wa-prompt-na">Not Applicable</span></div>
         </div>
         <div class="row" style="margin-top:14px;">
@@ -3829,6 +4133,7 @@ async function openWritingAssessmentWizard(){
       syncFormValues();
       if(isLit()) renderLitPaperLevelStep();
       else if(isIS()) { if(draft.isMethod==='criteria') renderISYearStep(); else renderISMethodStep(); }
+      else if(isLangLit()) renderLangLitPaperStep();
       else renderSubjectStep();
     });
     backdrop.querySelector('#wa-to-preview-btn').addEventListener('click', ()=>{
@@ -3836,8 +4141,11 @@ async function openWritingAssessmentWizard(){
       if(!draft.title.trim()){ toast('Please enter a title'); return; }
       if(isLit()){
         if(!draft.litWritingTypeText.trim()){ toast('Please describe the writing type'); return; }
-      } else if(!isIS() && draft.writingType==='Other' && !draft.writingTypeOther.trim()){
+      } else if(!isIS() && !isLangLit() && draft.writingType==='Other' && !draft.writingTypeOther.trim()){
         toast('Please describe the writing type'); return;
+      }
+      if((isIS()||isLangLit()) && draft.responseLength==='Other' && !draft.responseLengthOther.trim()){
+        toast('Please describe the response length'); return;
       }
       renderPreview();
     });
@@ -3860,10 +4168,11 @@ async function openWritingAssessmentWizard(){
           <div style="margin-top:4px;"><strong>${escapeHtml(draft.title)}</strong></div>
           <div class="muted" style="margin-top:4px;">${draft.type==='summative'?'Summative':'Formative'} &middot; ${draft.mode==='in_class_timed'?'In-Class Timed':'Take Home'} &middot; Due ${formatDateNice(draft.dueDate)}</div>
           <div style="margin-top:8px;"><strong>Writing Type:</strong> ${escapeHtml(finalWritingType)}</div>
-          ${needsCriteriaFlow() ? '' : isIS()
+          ${(isIS()||isLangLit()) ? `<div style="margin-top:8px;"><strong>Response Length:</strong> ${escapeHtml(draft.responseLength==='Other' ? draft.responseLengthOther.trim() : draft.responseLength)}</div>` : ''}
+          ${isLangLit() ? '' : needsCriteriaFlow() ? '' : isIS()
             ? `<div style="margin-top:8px;"><strong>Assessed via:</strong> ${draft.isMethod==='levels' ? 'BE / AE / ME / EE' : 'Comments and Feedback Only'}</div>`
             : `<div style="margin-top:8px;"><strong>Assessed via:</strong> ${escapeHtml(methodsLabel)}</div>`}
-          <div style="margin-top:8px;"><strong>${(isLit()||isIS())?'Task Prompt':'Prompt'}:</strong> ${draft.promptNA ? 'Not Applicable' : (draft.prompt.trim() ? escapeHtml(draft.prompt) : '<span class="muted">(none entered)</span>')}</div>
+          <div style="margin-top:8px;"><strong>${(isLit()||isIS()||isLangLit())?'Task Prompt':'Prompt'}:</strong> ${draft.promptNA ? 'Not Applicable' : (draft.prompt.trim() ? escapeHtml(draft.prompt) : '<span class="muted">(none entered)</span>')}</div>
         </div>
         <div class="row" style="margin-top:14px;">
           <button class="btn ghost" id="wa-back-to-form-btn">&larr; Edit</button>
@@ -3881,14 +4190,17 @@ async function openWritingAssessmentWizard(){
       // Level chips exactly like any other subject using that scale; "Comments and Feedback
       // Only" and the Criteria flow both save methods:[] (Criteria drives scoring separately).
       let finalMethods;
-      if(isLit()) finalMethods = [];
+      if(isLit() || isLangLit()) finalMethods = [];
       else if(isIS()) finalMethods = draft.isMethod === 'levels' ? ['be_ae_me_ee'] : [];
       else finalMethods = draft.methods.slice();
+      const finalResponseLength = (isIS()||isLangLit())
+        ? (draft.responseLength==='Other' ? draft.responseLengthOther.trim() : draft.responseLength)
+        : null;
       return {
         id: uuid(), classId: state.currentClassId, title: draft.title.trim(),
         type: draft.type, mode: draft.mode, dueDate: draft.dueDate,
         subject: draft.subject,
-        writingType: finalWritingType, methods: finalMethods,
+        writingType: finalWritingType, methods: finalMethods, responseLength: finalResponseLength,
         prompt: draft.promptNA ? null : (draft.prompt.trim() || null),
         createdAt: Date.now(), subjectMeta: null
       };
@@ -4145,6 +4457,141 @@ function openWritingQuoteModal(skillLabel, initialQuote, onSave){
 // other subject uses, this modal also lets the teacher multi-select which of the assessment's
 // chosen Criteria the tap applies to -- that tagging is what lets the report later auto-attribute
 // feedback to the Criterion that explains the score the student received.
+/* ============ WRITING ASSESSMENT: Tree Logic event wiring ============ */
+function wireTreeLogicEvents(assessment){
+  if(!state.writingTreeOpenSections) state.writingTreeOpenSections = { intro:true, body:true, conclusion:true, overall:true };
+
+  document.querySelectorAll('[data-tree-toggle-section]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const key = el.getAttribute('data-tree-toggle-section');
+      state.writingTreeOpenSections[key] = !state.writingTreeOpenSections[key];
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-tree-value]').forEach(el=>{
+    el.addEventListener('click', async ()=>{
+      const section = el.getAttribute('data-tree-section');
+      const item = el.getAttribute('data-tree-item');
+      const pAttr = el.getAttribute('data-tree-paragraph');
+      const value = parseInt(el.getAttribute('data-tree-value'), 10);
+      const feedback = await getOrCreateWritingFeedbackRecord(state.writingSelectedAssessmentId, state.currentClassId, state.writingSelectedStudentId);
+      const tree = ensureTreeLogicShape(feedback);
+      const target = (pAttr !== null) ? tree.body.paragraphs[parseInt(pAttr, 10)] : tree[section];
+      target[item] = (target[item] === value) ? null : value; // tap again to clear, same as every other chip picker in the app
+      feedback.updatedAt = Date.now();
+      await dbPut('writingFeedback', feedback);
+      render();
+    });
+  });
+
+  const otherInput = document.getElementById('tree-intro-other');
+  if(otherInput) otherInput.addEventListener('input', async ()=>{
+    const feedback = await getOrCreateWritingFeedbackRecord(state.writingSelectedAssessmentId, state.currentClassId, state.writingSelectedStudentId);
+    const tree = ensureTreeLogicShape(feedback);
+    tree.intro.other = otherInput.value;
+    feedback.updatedAt = Date.now();
+    await dbPut('writingFeedback', feedback);
+  });
+
+  document.querySelectorAll('[data-tree-paragraph-count-delta]').forEach(el=>{
+    el.addEventListener('click', async ()=>{
+      const delta = parseInt(el.getAttribute('data-tree-paragraph-count-delta'), 10);
+      const feedback = await getOrCreateWritingFeedbackRecord(state.writingSelectedAssessmentId, state.currentClassId, state.writingSelectedStudentId);
+      const tree = ensureTreeLogicShape(feedback);
+      const n = tree.body.paragraphs.length;
+      if(delta > 0 && n < 8) tree.body.paragraphs.push(newTreeParagraph());
+      else if(delta < 0 && n > 1) tree.body.paragraphs.pop();
+      if(state.writingTreeActiveParagraph >= tree.body.paragraphs.length) state.writingTreeActiveParagraph = tree.body.paragraphs.length - 1;
+      feedback.updatedAt = Date.now();
+      await dbPut('writingFeedback', feedback);
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-tree-active-paragraph]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      state.writingTreeActiveParagraph = parseInt(el.getAttribute('data-tree-active-paragraph'), 10);
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-tree-link-skip]').forEach(el=>{
+    el.addEventListener('click', async ()=>{
+      const pIdx = parseInt(el.getAttribute('data-tree-link-skip'), 10);
+      const feedback = await getOrCreateWritingFeedbackRecord(state.writingSelectedAssessmentId, state.currentClassId, state.writingSelectedStudentId);
+      const tree = ensureTreeLogicShape(feedback);
+      const p = tree.body.paragraphs[pIdx];
+      p.linkSkipped = !p.linkSkipped;
+      if(p.linkSkipped) p.link = null;
+      feedback.updatedAt = Date.now();
+      await dbPut('writingFeedback', feedback);
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-tree-conclusion-skip]').forEach(el=>{
+    el.addEventListener('click', async ()=>{
+      const feedback = await getOrCreateWritingFeedbackRecord(state.writingSelectedAssessmentId, state.currentClassId, state.writingSelectedStudentId);
+      const tree = ensureTreeLogicShape(feedback);
+      tree.conclusion.skipped = !tree.conclusion.skipped;
+      if(tree.conclusion.skipped) tree.conclusion.level = null;
+      feedback.updatedAt = Date.now();
+      await dbPut('writingFeedback', feedback);
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-tree-criteria-tag]').forEach(el=>{
+    el.addEventListener('click', (ev)=>{
+      ev.stopPropagation();
+      const section = el.getAttribute('data-tree-criteria-tag');
+      const item = el.getAttribute('data-tree-criteria-item');
+      const pStr = el.getAttribute('data-tree-criteria-paragraph');
+      openTreeCriteriaModal(assessment, section, item, pStr !== '' ? parseInt(pStr, 10) : null);
+    });
+  });
+}
+// Reuses the same optional multi-select-Criteria pattern as openCriteriaTapModal, but for
+// tagging a Tree Logic line item after the fact rather than at the moment of a quote-tap --
+// Mike's call: "Everything should still be able to be mapped to criteria if the teacher wishes."
+async function openTreeCriteriaModal(assessment, sectionKey, itemKey, paragraphIndex){
+  const criteria = (assessment.subjectMeta && assessment.subjectMeta.criteria) || [];
+  if(!criteria.length){ toast('No Criteria were selected for this assessment'); return; }
+  const feedback = await getOrCreateWritingFeedbackRecord(state.writingSelectedAssessmentId, state.currentClassId, state.writingSelectedStudentId);
+  const tree = ensureTreeLogicShape(feedback);
+  const target = (paragraphIndex != null) ? tree.body.paragraphs[paragraphIndex] : tree[sectionKey];
+  if(!target.criteria) target.criteria = {};
+  if(!target.criteria[itemKey]) target.criteria[itemKey] = [];
+  const current = new Set(target.criteria[itemKey]);
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'tree-criteria-modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Tag Criteria</h3>
+        <button class="icon-btn" id="close-tree-criteria-modal">&times;</button>
+      </div>
+      <div>${criteria.map(c=>`
+        <label class="card row between" style="cursor:pointer; margin-top:6px;">
+          <span>${escapeHtml(c.code)}: ${escapeHtml(c.label)}</span>
+          <input type="checkbox" data-tree-criterion="${escapeHtml(c.code)}" ${current.has(c.code)?'checked':''}>
+        </label>`).join('')}</div>
+      <button class="btn primary block" id="tree-criteria-save-btn" style="margin-top:12px;">Save</button>
+    </div>`;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#close-tree-criteria-modal').addEventListener('click', ()=> backdrop.remove());
+  backdrop.querySelector('#tree-criteria-save-btn').addEventListener('click', async ()=>{
+    const codes = Array.from(backdrop.querySelectorAll('[data-tree-criterion]:checked')).map(el=>el.getAttribute('data-tree-criterion'));
+    target.criteria[itemKey] = codes;
+    feedback.updatedAt = Date.now();
+    await dbPut('writingFeedback', feedback);
+    backdrop.remove();
+    render();
+  });
+}
+
 async function openCriteriaTapModal(assessment, polarity, skillKey){
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
@@ -4336,6 +4783,7 @@ function wireWritingTabEvents(){
       state.writingSelectedStudentId = el.getAttribute('data-open-student');
       state.writingView = 'student';
       state.writingStudentMode = null;
+      state.writingTreeActiveParagraph = 0; // fresh student -- start back on paragraph 1
       render();
     });
   });
@@ -4356,6 +4804,15 @@ function wireWritingTabEvents(){
     state.writingStudentMode = null;
     render();
   });
+
+  if(state.writingView === 'student' && state.writingSelectedAssessmentId){
+    // Fire-and-forget: wireTreeLogicEvents only attaches to [data-tree-*] elements, which only
+    // exist in the DOM when usesTreeLogic(assessment) was true at render time, so this is a
+    // no-op (matches zero elements) for every other subject/mode.
+    dbGet('writingAssessments', state.writingSelectedAssessmentId).then(assessment=>{
+      if(assessment && usesTreeLogic(assessment)) wireTreeLogicEvents(assessment);
+    });
+  }
 
   document.querySelectorAll('[data-wa-skill]').forEach(el=>{
     el.addEventListener('click', async (ev)=>{
