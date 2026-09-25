@@ -173,6 +173,32 @@
   }
   .tree-chip.selected{background:var(--tree-color); color:#fff;}
   .tree-section-header{cursor:pointer; padding:4px 0;}
+  /* Inline Criteria buttons on every Tree Logic item -- no modal, tap any individual code or
+     "All" directly on the card, per Mike's feedback that the "Tag Criteria" popup was one tap
+     too many. */
+  .tree-criteria-row{display:flex; flex-wrap:wrap; gap:4px; margin-top:8px;}
+  .tree-criteria-chip{
+    display:inline-flex; padding:4px 10px; border-radius:12px; border:1px solid var(--line);
+    background:#fff; color:var(--ink); font-size:11px; font-weight:600; cursor:pointer;
+  }
+  .tree-criteria-chip.selected{background:var(--ink); color:#fff; border-color:var(--ink);}
+  .tree-comment-input{margin-top:8px; min-height:40px; font-size:13px;}
+  /* Tree Logic report: a quiet label/value row per item instead of everything stacked as plain
+     bold-colon lines -- keeps it scannable once notes and Criteria tags are in the mix. */
+  .tree-report-section{margin-top:14px;}
+  .tree-report-section-title{
+    font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--muted);
+    padding-bottom:4px; margin-bottom:6px; border-bottom:2px solid var(--line);
+  }
+  .tree-report-row{display:flex; gap:14px; padding:7px 0; border-bottom:1px solid var(--line); align-items:flex-start;}
+  .tree-report-row:last-child{border-bottom:none;}
+  .tree-report-label{flex:0 0 160px; font-size:12px; font-weight:700; color:var(--muted);}
+  .tree-report-value{flex:1; min-width:0;}
+  .tree-report-badge{display:inline-block; padding:2px 10px; border-radius:10px; color:#fff; font-size:12px; font-weight:600;}
+  .tree-report-note{margin-top:4px; font-style:italic; font-size:12.5px; color:var(--muted);}
+  .tree-report-pill{display:inline-block; margin:4px 4px 0 0; padding:1px 8px; border-radius:9px; border:1px solid var(--line); font-size:10.5px; color:var(--ink);}
+  .tree-report-paragraph{margin-top:10px;}
+  .tree-report-paragraph-label{font-weight:700; font-size:13px; margin-bottom:4px;}
   .toast-root{position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:100; display:flex; flex-direction:column; gap:8px; align-items:center;}
   .toast{background:var(--ink); color:#fff; padding:10px 18px; border-radius:30px; font-size:14px; font-weight:600; box-shadow:0 6px 20px rgba(0,0,0,0.2); animation:fade .25s ease-out;}
   .toast.good{background:var(--good);}
@@ -671,8 +697,8 @@ const TREE_LOGIC_SCHEMA = {
     items: {
       argument: { label: 'Argument', levels: ['Inconsistent', 'Somewhat Consistent', 'Mostly Consistent', 'Consistent'] },
       organization: { label: 'Organization', levels: ['Poorly Organized', 'Somewhat Organized', 'Mostly Organized', 'Strongly Organized'] },
-      comprehension: { label: 'Comprehension / Understanding', levels: ['Weak (BE)', 'Approaching Expectations (AE)', 'Meeting Expectations (ME)', 'Exceeding Expectations (EE)'] },
-      grammar: { label: 'Grammar & Writing', levels: ['BE', 'AE', 'ME', 'EE'] }
+      comprehension: { label: 'Comprehension / Understanding', levels: ['Below Expectations', 'Approaching Expectations', 'Meeting Expectations', 'Beyond'] },
+      grammar: { label: 'Grammar & Writing', levels: ['Below Expectations', 'Approaching Expectations', 'Meeting Expectations', 'Beyond'] }
     }
   }
 };
@@ -684,17 +710,20 @@ function usesTreeLogic(assessment){
 function ensureTreeLogicShape(feedback){
   if(feedback.tree) return feedback.tree;
   feedback.tree = {
-    intro: { point: null, context: null, thesis: null, other: '', criteria: { point:[], context:[], thesis:[] } },
+    intro: { point: null, context: null, thesis: null, other: '',
+      criteria: { point:[], context:[], thesis:[] }, comments: { point:'', context:'', thesis:'' } },
     body: { paragraphs: [ newTreeParagraph() ] },
-    conclusion: { level: null, skipped: false, criteria: { level: [] } },
+    conclusion: { level: null, skipped: false, criteria: { level: [] }, comments: { level:'' } },
     overall: { argument: null, organization: null, comprehension: null, grammar: null,
-      criteria: { argument:[], organization:[], comprehension:[], grammar:[] } }
+      criteria: { argument:[], organization:[], comprehension:[], grammar:[] },
+      comments: { argument:'', organization:'', comprehension:'', grammar:'' } }
   };
   return feedback.tree;
 }
 function newTreeParagraph(){
   return { point: null, evidence: null, analysis: null, link: null, linkSkipped: false, peel: null,
-    criteria: { point:[], evidence:[], analysis:[], link:[], peel:[] } };
+    criteria: { point:[], evidence:[], analysis:[], link:[], peel:[] },
+    comments: { point:'', evidence:'', analysis:'', link:'', peel:'' } };
 }
 function isISAssessment(assessment){
   return !!(assessment && assessment.subject === 'Individuals and Societies MYP' && assessment.subjectMeta && assessment.subjectMeta.mypYear);
@@ -3112,21 +3141,34 @@ function renderTreeLogicEditorHtml(assessment, feedback){
   if(state.writingTreeActiveParagraph >= tree.body.paragraphs.length) state.writingTreeActiveParagraph = tree.body.paragraphs.length - 1;
   const activeP = state.writingTreeActiveParagraph;
 
-  const criteriaTagBtnHtml = (section, item, pIdx) => hasCriteriaTags
-    ? `<span class="btn small ghost" style="padding:2px 8px; font-size:11px;" data-tree-criteria-tag="${section}" data-tree-criteria-item="${item}" data-tree-criteria-paragraph="${pIdx!=null?pIdx:''}">Tag Criteria</span>`
-    : '';
-  const itemBlockHtml = (schemaItem, key, section, currentLevel, pIdx) => `
+  // Inline Criteria buttons directly on the card -- tap any individual code, or "All" to select
+  // every one, no modal in the way. Mike's call: this was "one tap too many."
+  const criteriaChipsHtml = (section, item, target, pIdx) => {
+    if(!hasCriteriaTags) return '';
+    const criteria = assessment.subjectMeta.criteria;
+    const current = new Set((target.criteria && target.criteria[item]) || []);
+    const allSelected = criteria.length>0 && criteria.every(c=>current.has(c.code));
+    const pAttr = (pIdx!=null) ? ` data-tree-criteria-paragraph="${pIdx}"` : '';
+    const allChip = `<span class="tree-criteria-chip ${allSelected?'selected':''}" data-tree-criteria-section="${section}" data-tree-criteria-item="${item}"${pAttr} data-tree-criteria-all="1">All</span>`;
+    const chips = criteria.map(c=>`<span class="tree-criteria-chip ${current.has(c.code)?'selected':''}" data-tree-criteria-section="${section}" data-tree-criteria-item="${item}"${pAttr} data-tree-criteria-code="${escapeHtml(c.code)}">${escapeHtml(c.code)}</span>`).join('');
+    return `<div class="tree-criteria-row">${allChip}${chips}</div>`;
+  };
+  const commentFieldHtml = (section, item, target, pIdx) => {
+    const pAttr = (pIdx!=null) ? ` data-tree-comment-paragraph="${pIdx}"` : '';
+    const value = (target.comments && target.comments[item]) || '';
+    return `<textarea class="tree-comment-input" data-tree-comment-section="${section}" data-tree-comment-item="${item}"${pAttr} placeholder="Add a note or quote (optional)...">${escapeHtml(value)}</textarea>`;
+  };
+  const itemBlockHtml = (schemaItem, key, section, target, pIdx) => `
     <div class="card" style="margin-top:8px;">
-      <div class="row between" style="align-items:flex-start;">
-        <strong>${escapeHtml(schemaItem.label)}</strong>
-        ${criteriaTagBtnHtml(section, key, pIdx)}
-      </div>
-      <div style="margin-top:6px;">${treeLevelChipsHtml(section, key, schemaItem.levels, currentLevel, pIdx)}</div>
+      <strong>${escapeHtml(schemaItem.label)}</strong>
+      <div style="margin-top:6px;">${treeLevelChipsHtml(section, key, schemaItem.levels, target[key], pIdx)}</div>
+      ${criteriaChipsHtml(section, key, target, pIdx)}
+      ${commentFieldHtml(section, key, target, pIdx)}
     </div>`;
 
   // ---- Intro ----
   const introItemsHtml = Object.entries(TREE_LOGIC_SCHEMA.intro.items).map(([key,item])=>
-    itemBlockHtml(item, key, 'intro', tree.intro[key], null)
+    itemBlockHtml(item, key, 'intro', tree.intro, null)
   ).join('') + `
     <div class="card" style="margin-top:8px;">
       <strong>Other</strong>
@@ -3146,15 +3188,15 @@ function renderTreeLogicEditorHtml(assessment, feedback){
         <div class="card" style="margin-top:8px;">
           <div class="row between" style="align-items:flex-start;">
             <strong>${escapeHtml(item.label)}</strong>
-            <span class="row" style="gap:6px;">
-              ${criteriaTagBtnHtml('body', key, activeP)}
-              <span class="btn small ghost" data-tree-link-skip="${activeP}">${skipped?'N/A (tap to re-enable)':'Mark N/A'}</span>
-            </span>
+            <span class="btn small ghost" data-tree-link-skip="${activeP}">${skipped?'N/A (tap to re-enable)':'Mark N/A'}</span>
           </div>
-          ${skipped ? '<div class="muted" style="margin-top:6px;">Marked not applicable for this paragraph.</div>' : `<div style="margin-top:6px;">${treeLevelChipsHtml('body', key, item.levels, p[key], activeP)}</div>`}
+          ${skipped ? '<div class="muted" style="margin-top:6px;">Marked not applicable for this paragraph.</div>' : `
+            <div style="margin-top:6px;">${treeLevelChipsHtml('body', key, item.levels, p[key], activeP)}</div>
+            ${criteriaChipsHtml('body', key, p, activeP)}
+            ${commentFieldHtml('body', key, p, activeP)}`}
         </div>`;
     }
-    return itemBlockHtml(item, key, 'body', p[key], activeP);
+    return itemBlockHtml(item, key, 'body', p, activeP);
   }).join('');
   const bodyHtml = `
     <div class="row between" style="align-items:center; margin-bottom:8px;">
@@ -3174,11 +3216,11 @@ function renderTreeLogicEditorHtml(assessment, feedback){
     <div class="row" style="margin-bottom:8px;">
       <span class="btn small ghost" data-tree-conclusion-skip="1">${cSkipped?'Not Applicable (tap to re-enable)':'Mark Not Applicable'}</span>
     </div>
-    ${cSkipped ? '<div class="muted">Marked not applicable for this task.</div>' : itemBlockHtml(TREE_LOGIC_SCHEMA.conclusion.items.conclusion, 'level', 'conclusion', tree.conclusion.level, null)}`;
+    ${cSkipped ? '<div class="muted">Marked not applicable for this task.</div>' : itemBlockHtml(TREE_LOGIC_SCHEMA.conclusion.items.conclusion, 'level', 'conclusion', tree.conclusion, null)}`;
 
   // ---- Overall ----
   const overallHtml = Object.entries(TREE_LOGIC_SCHEMA.overall.items).map(([key,item])=>
-    itemBlockHtml(item, key, 'overall', tree.overall[key], null)
+    itemBlockHtml(item, key, 'overall', tree.overall, null)
   ).join('');
 
   const sectionHtml = (key, label, bodyContent) => `
@@ -3197,42 +3239,58 @@ function renderTreeLogicEditorHtml(assessment, feedback){
 }
 // Report view: walks the same schema and shows only what was actually rated, section by
 // section, with the plain-language level text (not just a color) plus any Criteria tags.
+// Quiet label/value rows instead of stacked bold-colon lines -- once a note and a couple of
+// Criteria tags are added to an item, a flat line gets cluttered fast. Colored badge carries the
+// achievement level, note sits indented and italic underneath, Criteria show as small quiet pills.
 function writingTreeReportContentHtml(assessment, student, feedback, tally){
   const tree = ensureTreeLogicShape(feedback);
-  const criteriaByCode = {};
-  ((assessment.subjectMeta && assessment.subjectMeta.criteria) || []).forEach(c=> criteriaByCode[c.code]=c.label);
-  const criteriaTagHtml = (criteriaMap, key) => {
-    const codes = criteriaMap && criteriaMap[key];
-    if(!codes || !codes.length) return '';
-    return `<span class="muted"> &middot; ${codes.map(code=>escapeHtml(criteriaByCode[code]?`${code}`:code)).join(', ')}</span>`;
-  };
   const itemLineHtml = (schemaItem, key, target) => {
     const level = target[key];
-    if(level == null) return '';
-    return `<div style="margin-bottom:4px;"><strong>${escapeHtml(schemaItem.label)}:</strong> ${escapeHtml(schemaItem.levels[level])}${criteriaTagHtml(target.criteria, key)}</div>`;
+    const note = (target.comments && target.comments[key]) || '';
+    const codes = (target.criteria && target.criteria[key]) || [];
+    if(level == null && !note && !codes.length) return '';
+    const badgeHtml = level != null
+      ? `<span class="tree-report-badge" style="background:${TREE_LOGIC_LEVEL_COLORS[level]};">${escapeHtml(schemaItem.levels[level])}</span>`
+      : '<span class="muted" style="font-size:12.5px;">No level selected</span>';
+    const noteHtml = note ? `<div class="tree-report-note">&ldquo;${escapeHtml(note)}&rdquo;</div>` : '';
+    const pillsHtml = codes.length ? `<div>${codes.map(code=>`<span class="tree-report-pill">${escapeHtml(code)}</span>`).join('')}</div>` : '';
+    return `
+      <div class="tree-report-row">
+        <div class="tree-report-label">${escapeHtml(schemaItem.label)}</div>
+        <div class="tree-report-value">${badgeHtml}${noteHtml}${pillsHtml}</div>
+      </div>`;
   };
-  const introHtml = Object.entries(TREE_LOGIC_SCHEMA.intro.items).map(([key,item])=> itemLineHtml(item, key, tree.intro)).join('')
-    + (tree.intro.other ? `<div style="margin-bottom:4px;"><strong>Other:</strong> ${escapeHtml(tree.intro.other)}</div>` : '');
-  const bodyHtml = tree.body.paragraphs.map((p,i)=>{
-    const lines = Object.entries(TREE_LOGIC_SCHEMA.body.perParagraphItems).map(([key,item])=>{
-      if(item.skippable && p.linkSkipped) return `<div style="margin-bottom:4px;"><strong>${escapeHtml(item.label)}:</strong> <span class="muted">Not Applicable</span></div>`;
+  const sectionHtml = (label, rowsHtml) => rowsHtml.trim()
+    ? `<div class="tree-report-section"><div class="tree-report-section-title">${escapeHtml(label)}</div>${rowsHtml}</div>`
+    : '';
+
+  const introRows = Object.entries(TREE_LOGIC_SCHEMA.intro.items).map(([key,item])=> itemLineHtml(item, key, tree.intro)).join('')
+    + (tree.intro.other ? `<div class="tree-report-row"><div class="tree-report-label">Other</div><div class="tree-report-value">${escapeHtml(tree.intro.other)}</div></div>` : '');
+
+  const bodyRows = tree.body.paragraphs.map((p,i)=>{
+    const rows = Object.entries(TREE_LOGIC_SCHEMA.body.perParagraphItems).map(([key,item])=>{
+      if(item.skippable && p.linkSkipped) return `
+        <div class="tree-report-row"><div class="tree-report-label">${escapeHtml(item.label)}</div><div class="tree-report-value muted">Not Applicable</div></div>`;
       return itemLineHtml(item, key, p);
     }).join('');
-    return lines.trim() ? `<div style="margin:8px 0; padding-top:8px; border-top:1px solid var(--line);"><em>Paragraph ${i+1}</em>${lines}</div>` : '';
+    return rows.trim() ? `<div class="tree-report-paragraph"><div class="tree-report-paragraph-label">Paragraph ${i+1}</div>${rows}</div>` : '';
   }).join('');
-  const conclusionHtml = tree.conclusion.skipped
-    ? '<div class="muted">Not Applicable</div>'
+
+  const conclusionRows = tree.conclusion.skipped
+    ? '<div class="tree-report-row"><div class="tree-report-label">Conclusion</div><div class="tree-report-value muted">Not Applicable</div></div>'
     : itemLineHtml(TREE_LOGIC_SCHEMA.conclusion.items.conclusion, 'level', tree.conclusion);
-  const overallHtml = Object.entries(TREE_LOGIC_SCHEMA.overall.items).map(([key,item])=> itemLineHtml(item, key, tree.overall)).join('');
+
+  const overallRows = Object.entries(TREE_LOGIC_SCHEMA.overall.items).map(([key,item])=> itemLineHtml(item, key, tree.overall)).join('');
+
   return `
     <h3>${escapeHtml(assessment.title)}</h3>
     <div class="muted" style="margin-bottom:10px;">${escapeHtml(student.name)} &middot; Due ${formatDateNice(assessment.dueDate)}</div>
     ${assessment.prompt ? `<div class="card" style="margin-bottom:14px;"><em>${escapeHtml(assessment.prompt)}</em></div>` : ''}
-    ${introHtml ? `<h4>Intro</h4>${introHtml}` : ''}
-    ${bodyHtml.trim() ? `<h4 style="margin-top:12px;">Body</h4>${bodyHtml}` : ''}
-    ${conclusionHtml ? `<h4 style="margin-top:12px;">Conclusion</h4>${conclusionHtml}` : ''}
-    ${overallHtml ? `<h4 style="margin-top:12px;">Overall</h4>${overallHtml}` : ''}
-    ${feedback.comment ? `<h4 style="margin-top:16px;">Comments</h4><p>${escapeHtml(feedback.comment)}</p>` : ''}
+    ${sectionHtml('Intro', introRows)}
+    ${sectionHtml('Body', bodyRows)}
+    ${sectionHtml('Conclusion', conclusionRows)}
+    ${sectionHtml('Overall', overallRows)}
+    ${feedback.comment ? `<div class="tree-report-section"><div class="tree-report-section-title">Comments</div><p style="margin:0;">${escapeHtml(feedback.comment)}</p></div>` : ''}
   `;
 }
 /* ============ WRITING ASSESSMENT: rendering ============ */
@@ -4542,53 +4600,63 @@ function wireTreeLogicEvents(assessment){
     });
   });
 
-  document.querySelectorAll('[data-tree-criteria-tag]').forEach(el=>{
-    el.addEventListener('click', (ev)=>{
+  // Inline Criteria chips live right on the card now -- tap a code (or "All") to toggle it,
+  // no modal. Mike's call: the "Tag Criteria" popup was one tap too many.
+  const treeTarget = async (section, pAttr) => {
+    const feedback = await getOrCreateWritingFeedbackRecord(state.writingSelectedAssessmentId, state.currentClassId, state.writingSelectedStudentId);
+    const tree = ensureTreeLogicShape(feedback);
+    const target = (pAttr !== null && pAttr !== undefined) ? tree.body.paragraphs[parseInt(pAttr, 10)] : tree[section];
+    return { feedback, target };
+  };
+  document.querySelectorAll('[data-tree-criteria-code]').forEach(el=>{
+    el.addEventListener('click', async (ev)=>{
       ev.stopPropagation();
-      const section = el.getAttribute('data-tree-criteria-tag');
+      const section = el.getAttribute('data-tree-criteria-section');
       const item = el.getAttribute('data-tree-criteria-item');
-      const pStr = el.getAttribute('data-tree-criteria-paragraph');
-      openTreeCriteriaModal(assessment, section, item, pStr !== '' ? parseInt(pStr, 10) : null);
+      const code = el.getAttribute('data-tree-criteria-code');
+      const pAttr = el.getAttribute('data-tree-criteria-paragraph');
+      const { feedback, target } = await treeTarget(section, pAttr);
+      if(!target.criteria) target.criteria = {};
+      const codes = new Set(target.criteria[item] || []);
+      if(codes.has(code)) codes.delete(code); else codes.add(code);
+      target.criteria[item] = Array.from(codes);
+      feedback.updatedAt = Date.now();
+      await dbPut('writingFeedback', feedback);
+      render();
     });
   });
-}
-// Reuses the same optional multi-select-Criteria pattern as openCriteriaTapModal, but for
-// tagging a Tree Logic line item after the fact rather than at the moment of a quote-tap --
-// Mike's call: "Everything should still be able to be mapped to criteria if the teacher wishes."
-async function openTreeCriteriaModal(assessment, sectionKey, itemKey, paragraphIndex){
-  const criteria = (assessment.subjectMeta && assessment.subjectMeta.criteria) || [];
-  if(!criteria.length){ toast('No Criteria were selected for this assessment'); return; }
-  const feedback = await getOrCreateWritingFeedbackRecord(state.writingSelectedAssessmentId, state.currentClassId, state.writingSelectedStudentId);
-  const tree = ensureTreeLogicShape(feedback);
-  const target = (paragraphIndex != null) ? tree.body.paragraphs[paragraphIndex] : tree[sectionKey];
-  if(!target.criteria) target.criteria = {};
-  if(!target.criteria[itemKey]) target.criteria[itemKey] = [];
-  const current = new Set(target.criteria[itemKey]);
-  const backdrop = document.createElement('div');
-  backdrop.className = 'modal-backdrop';
-  backdrop.id = 'tree-criteria-modal-backdrop';
-  backdrop.innerHTML = `
-    <div class="modal">
-      <div class="modal-header">
-        <h3>Tag Criteria</h3>
-        <button class="icon-btn" id="close-tree-criteria-modal">&times;</button>
-      </div>
-      <div>${criteria.map(c=>`
-        <label class="card row between" style="cursor:pointer; margin-top:6px;">
-          <span>${escapeHtml(c.code)}: ${escapeHtml(c.label)}</span>
-          <input type="checkbox" data-tree-criterion="${escapeHtml(c.code)}" ${current.has(c.code)?'checked':''}>
-        </label>`).join('')}</div>
-      <button class="btn primary block" id="tree-criteria-save-btn" style="margin-top:12px;">Save</button>
-    </div>`;
-  document.body.appendChild(backdrop);
-  backdrop.querySelector('#close-tree-criteria-modal').addEventListener('click', ()=> backdrop.remove());
-  backdrop.querySelector('#tree-criteria-save-btn').addEventListener('click', async ()=>{
-    const codes = Array.from(backdrop.querySelectorAll('[data-tree-criterion]:checked')).map(el=>el.getAttribute('data-tree-criterion'));
-    target.criteria[itemKey] = codes;
-    feedback.updatedAt = Date.now();
-    await dbPut('writingFeedback', feedback);
-    backdrop.remove();
-    render();
+  document.querySelectorAll('[data-tree-criteria-all]').forEach(el=>{
+    el.addEventListener('click', async (ev)=>{
+      ev.stopPropagation();
+      const section = el.getAttribute('data-tree-criteria-section');
+      const item = el.getAttribute('data-tree-criteria-item');
+      const pAttr = el.getAttribute('data-tree-criteria-paragraph');
+      const { feedback, target } = await treeTarget(section, pAttr);
+      if(!target.criteria) target.criteria = {};
+      const allCodes = assessment.subjectMeta.criteria.map(c=>c.code);
+      const current = new Set(target.criteria[item] || []);
+      const allSelected = allCodes.length>0 && allCodes.every(c=>current.has(c));
+      target.criteria[item] = allSelected ? [] : allCodes.slice();
+      feedback.updatedAt = Date.now();
+      await dbPut('writingFeedback', feedback);
+      render();
+    });
+  });
+
+  // Per-item comment/quote field -- same "add a note" benefit the old skill-tap quotes had.
+  // Saved on every keystroke like the assessment-level comment box, without a re-render, so
+  // the teacher never loses their place mid-sentence.
+  document.querySelectorAll('[data-tree-comment-section]').forEach(el=>{
+    el.addEventListener('input', async ()=>{
+      const section = el.getAttribute('data-tree-comment-section');
+      const item = el.getAttribute('data-tree-comment-item');
+      const pAttr = el.getAttribute('data-tree-comment-paragraph');
+      const { feedback, target } = await treeTarget(section, pAttr);
+      if(!target.comments) target.comments = {};
+      target.comments[item] = el.value;
+      feedback.updatedAt = Date.now();
+      await dbPut('writingFeedback', feedback);
+    });
   });
 }
 
