@@ -183,22 +183,32 @@
   }
   .tree-criteria-chip.selected{background:var(--ink); color:#fff; border-color:var(--ink);}
   .tree-comment-input{margin-top:8px; min-height:40px; font-size:13px;}
-  /* Tree Logic report: a quiet label/value row per item instead of everything stacked as plain
-     bold-colon lines -- keeps it scannable once notes and Criteria tags are in the mix. */
-  .tree-report-section{margin-top:14px;}
+  /* Tree Logic report: Snapshot (front) + Detailed Feedback (back), matching Mike's two-page
+     redesign. Section titles are a quiet uppercase label with a divider; the Snapshot's
+     success/challenge boxes get a soft tint; the Detailed page uses compact tables so a full
+     essay's worth of paragraphs still fits on one printed page. */
+  .tree-report-page{padding:22px 26px;}
   .tree-report-section-title{
     font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--muted);
     padding-bottom:4px; margin-bottom:6px; border-bottom:2px solid var(--line);
   }
-  .tree-report-row{display:flex; gap:14px; padding:7px 0; border-bottom:1px solid var(--line); align-items:flex-start;}
-  .tree-report-row:last-child{border-bottom:none;}
-  .tree-report-label{flex:0 0 160px; font-size:12px; font-weight:700; color:var(--muted);}
-  .tree-report-value{flex:1; min-width:0;}
-  .tree-report-badge{display:inline-block; padding:2px 10px; border-radius:10px; color:#fff; font-size:12px; font-weight:600;}
-  .tree-report-note{margin-top:4px; font-style:italic; font-size:12.5px; color:var(--muted);}
-  .tree-report-pill{display:inline-block; margin:4px 4px 0 0; padding:1px 8px; border-radius:9px; border:1px solid var(--line); font-size:10.5px; color:var(--ink);}
-  .tree-report-paragraph{margin-top:10px;}
-  .tree-report-paragraph-label{font-weight:700; font-size:13px; margin-bottom:4px;}
+  .tree-snap-box{border:1px solid var(--line); border-radius:8px; padding:10px 14px; margin-top:8px;}
+  .tree-snap-box.positive{background:#eef7f0;}
+  .tree-snap-box.negative{background:#fdf2ee;}
+  .tree-snap-box-title{font-weight:700; font-size:12.5px; margin-bottom:4px;}
+  .tree-snap-bullet{padding:3px 0; font-size:12.5px; line-height:1.4;}
+  .tree-snap-tag{color:var(--muted); font-size:11px; font-weight:700;}
+  table.tree-detail-table{width:100%; border-collapse:collapse; margin-top:4px; font-size:11.5px;}
+  table.tree-detail-table th, table.tree-detail-table td{border:1px solid var(--line); padding:5px 8px; text-align:left; vertical-align:top;}
+  table.tree-detail-table th{background:#f7f8fa; font-size:10px; text-transform:uppercase; letter-spacing:.3px; color:var(--muted); font-weight:700;}
+  .tree-detail-dot{display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle;}
+  @media print{
+    .tree-report-page{padding:10px 16px; font-size:11px;}
+    .tree-report-page h2{font-size:16px;}
+    .tree-snap-bullet{font-size:11px; padding:2px 0;}
+    table.tree-detail-table{font-size:10px;}
+    table.tree-detail-table th, table.tree-detail-table td{padding:3px 6px;}
+  }
   .toast-root{position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:100; display:flex; flex-direction:column; gap:8px; align-items:center;}
   .toast{background:var(--ink); color:#fff; padding:10px 18px; border-radius:30px; font-size:14px; font-weight:600; box-shadow:0 6px 20px rgba(0,0,0,0.2); animation:fade .25s ease-out;}
   .toast.good{background:var(--good);}
@@ -725,6 +735,76 @@ function newTreeParagraph(){
     criteria: { point:[], evidence:[], analysis:[], link:[], peel:[] },
     comments: { point:'', evidence:'', analysis:'', link:'', peel:'' } };
 }
+/* ============ Tree Logic: tier/verdict aggregation ============
+   Collapses every rated instance of a skill (a single Intro/Conclusion/Overall rating, or one
+   per paragraph for Body items) into ONE verdict per skill-key. Mike's rule, confirmed directly:
+   severity always wins -- any Red or Orange instance anywhere marks that skill as needing work,
+   even if another paragraph was Green (never average away one bad paragraph). Only when nothing
+   negative is present does a Green (primary success) or Yellow-only (secondary, "meets
+   expectations") verdict apply. Thesis/Evidence/Analysis/PEEL are a tie-break ONLY -- used to
+   fill remaining Top4/Bottom4 slots when a tier has more candidates than room left; a Red/Orange
+   item that isn't on this list still comes before anything in a lower-severity tier. */
+const TREE_PRIORITY_KEYS = new Set(['thesis', 'evidence', 'analysis', 'peel']);
+const TREE_TIER_BY_LEVEL = ['red', 'orange', 'yellow', 'green']; // index = level (0-3), matches TREE_LOGIC_LEVEL_COLORS order
+function collapseTreeVerdict(schemaItem, key, section, instances){
+  const rated = instances
+    .map(t => ({ level: t[key], comment: (t.comments && t.comments[key]) || '', criteria: (t.criteria && t.criteria[key]) || [] }))
+    .filter(r => r.level != null);
+  if(!rated.length) return null;
+  let tier;
+  if(rated.some(r=>r.level===0)) tier = 'red';
+  else if(rated.some(r=>r.level===1)) tier = 'orange';
+  else if(rated.some(r=>r.level===3)) tier = 'green';
+  else tier = 'yellow';
+  const repLevel = tier==='red' ? 0 : tier==='orange' ? 1 : tier==='green' ? 3 : 2;
+  // The comment shown is whichever instance(s) actually produced this tier (e.g. the Red
+  // paragraph, not an unrelated Green one) -- teacher's own words only, nothing invented.
+  const comment = rated.filter(r=>r.level===repLevel).map(r=>r.comment).filter(Boolean).join(' ');
+  const criteriaCodes = Array.from(new Set(rated.flatMap(r=>r.criteria)));
+  return {
+    key, section, label: schemaItem.label, levelText: schemaItem.levels[repLevel], tier, repLevel,
+    comment, criteriaCodes, priority: TREE_PRIORITY_KEYS.has(key), positive: (tier==='green' || tier==='yellow')
+  };
+}
+// Walks the whole tree and returns one verdict per rated skill-key (skipped Conclusion/Link
+// items are simply absent, same as "never logged").
+function computeTreeVerdicts(tree){
+  const verdicts = [];
+  Object.entries(TREE_LOGIC_SCHEMA.intro.items).forEach(([key,item])=>{
+    const v = collapseTreeVerdict(item, key, 'intro', [tree.intro]);
+    if(v) verdicts.push(v);
+  });
+  Object.entries(TREE_LOGIC_SCHEMA.body.perParagraphItems).forEach(([key,item])=>{
+    const instances = tree.body.paragraphs.filter(p => !(item.skippable && p.linkSkipped));
+    const v = collapseTreeVerdict(item, key, 'body', instances);
+    if(v) verdicts.push(v);
+  });
+  if(!tree.conclusion.skipped){
+    const v = collapseTreeVerdict(TREE_LOGIC_SCHEMA.conclusion.items.conclusion, 'level', 'conclusion', [tree.conclusion]);
+    if(v) verdicts.push(v);
+  }
+  Object.entries(TREE_LOGIC_SCHEMA.overall.items).forEach(([key,item])=>{
+    const v = collapseTreeVerdict(item, key, 'overall', [tree.overall]);
+    if(v) verdicts.push(v);
+  });
+  return verdicts;
+}
+// Picks up to n verdicts for the Snapshot's Top/Bottom list. Severity tier is the sort key;
+// Thesis/Evidence/Analysis/PEEL only break ties for the slots left within the SAME tier.
+function pickTreeTopN(verdicts, positive, n){
+  const tierOrder = positive ? ['green','yellow'] : ['red','orange'];
+  const picked = [];
+  for(const tier of tierOrder){
+    if(picked.length >= n) break;
+    const inTier = verdicts.filter(v=>v.tier===tier);
+    const ordered = inTier.filter(v=>v.priority).concat(inTier.filter(v=>!v.priority));
+    for(const v of ordered){
+      if(picked.length >= n) break;
+      picked.push(v);
+    }
+  }
+  return picked;
+}
 function isISAssessment(assessment){
   return !!(assessment && assessment.subject === 'Individuals and Societies MYP' && assessment.subjectMeta && assessment.subjectMeta.mypYear);
 }
@@ -1148,9 +1228,11 @@ const state = {
   writingSelectedAssessmentId:null,
   writingSelectedStudentId:null,
   writingStudentMode:null,   // null (auto: report if submitted else edit) | edit | review | report
-  writingDataView:'student', // student | class (sub-tab within the Data sub-view)
+  writingDataView:'student', // student | class | tasktype (sub-tab within the Data sub-view)
   writingDataSelectedStudentId:null,
-  writingDataSelectedAssessmentId:null // when set, Data view is scoped to one assessment instead of all-time
+  writingDataSelectedAssessmentId:null, // when set, Data view is scoped to one assessment instead of all-time
+  writingDataSubjectScope:'legacy',     // 'legacy' (flat skill-tap subjects) | 'Individuals and Societies MYP' | 'Language and Literature MYP'
+  writingDataTaskType:null              // selected task type for the "By Task Type" view
 };
 
 // All per-class UI navigation state (which tab, which assessment/student is drilled into,
@@ -1170,6 +1252,8 @@ function resetPerClassUiState(){
   state.writingDataView = 'student';
   state.writingDataSelectedStudentId = null;
   state.writingDataSelectedAssessmentId = null;
+  state.writingDataSubjectScope = 'legacy';
+  state.writingDataTaskType = null;
 }
 const CALLED_ON_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -3237,61 +3321,119 @@ function renderTreeLogicEditorHtml(assessment, feedback){
       ${sectionHtml('overall', 'Overall', overallHtml)}
     </div>`;
 }
-// Report view: walks the same schema and shows only what was actually rated, section by
-// section, with the plain-language level text (not just a color) plus any Criteria tags.
-// Quiet label/value rows instead of stacked bold-colon lines -- once a note and a couple of
-// Criteria tags are added to an item, a flat line gets cluttered fast. Colored badge carries the
-// achievement level, note sits indented and italic underneath, Criteria show as small quiet pills.
-function writingTreeReportContentHtml(assessment, student, feedback, tally){
+// ---- Report: "Snapshot" (front) + "Detailed Feedback" (back), matching Mike's two-page
+// redesign. Snapshot is Top4/Bottom4 (via the tier aggregation above) + MYP Criteria helped/hurt
+// + the final "Your Next Step" comment, meant to be read in under a minute. Detailed is every
+// single rated instance, top to bottom, with Criteria tags intentionally left off (per Mike's
+// own note on the example) since that context lives on the Snapshot instead. No invented
+// boilerplate sentences here -- only the teacher's own typed comments show up as feedback text.
+function writingTreeSnapshotPageHtml(assessment, student, feedback){
   const tree = ensureTreeLogicShape(feedback);
-  const itemLineHtml = (schemaItem, key, target) => {
+  const verdicts = computeTreeVerdicts(tree);
+  const top = pickTreeTopN(verdicts, true, 4);
+  const bottom = pickTreeTopN(verdicts, false, 4);
+  const criteria = (assessment.subjectMeta && assessment.subjectMeta.criteria) || [];
+
+  // Top4 headlines with the achievement LEVEL text ("Strong Thesis") -- naming the win.
+  // Bottom4 headlines with the ITEM name ("Analysis") -- naming the area to work on.
+  const bulletHtml = (v, useLevelAsHeadline) => {
+    const headline = useLevelAsHeadline ? v.levelText : v.label;
+    const tagHtml = v.criteriaCodes.length ? ` <span class="tree-snap-tag">[${v.criteriaCodes.map(escapeHtml).join(', ')}]</span>` : '';
+    const commentHtml = v.comment ? ` &mdash; ${escapeHtml(v.comment)}` : '';
+    return `<div class="tree-snap-bullet">&bull; <strong>${escapeHtml(headline)}</strong>${commentHtml}${tagHtml}</div>`;
+  };
+
+  const criteriaRowsHtml = criteria.map(c=>{
+    const helped = pickTreeTopN(verdicts.filter(v=>v.criteriaCodes.includes(c.code)), true, 99).map(v=>escapeHtml(v.levelText));
+    const hurt = pickTreeTopN(verdicts.filter(v=>v.criteriaCodes.includes(c.code)), false, 99).map(v=>escapeHtml(v.label));
+    return `
+      <tr>
+        <td><strong>${escapeHtml(c.code)}</strong> ${escapeHtml(c.label||'')}</td>
+        <td>${helped.length ? helped.join('; ') : '<span class="muted">&mdash;</span>'}</td>
+        <td>${hurt.length ? hurt.join('; ') : '<span class="muted">&mdash;</span>'}</td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <div class="wa-print-page tree-report-page">
+      <h2 style="margin:0 0 2px;">${escapeHtml(student.name)}</h2>
+      <div class="muted" style="margin-bottom:14px;">${escapeHtml(assessment.subject||'')} &middot; ${escapeHtml(assessment.title)} &middot; ${formatDateNice(assessment.dueDate)}</div>
+      <div class="tree-report-section-title" style="border:none; margin-bottom:8px;">Feedback Snapshot</div>
+
+      <div class="tree-snap-box positive">
+        <div class="tree-snap-box-title">What You Did Well</div>
+        ${top.length ? top.map(v=>bulletHtml(v,true)).join('') : '<div class="muted">Nothing rated yet.</div>'}
+      </div>
+      <div class="tree-snap-box negative">
+        <div class="tree-snap-box-title">What Hurt Your Performance</div>
+        ${bottom.length ? bottom.map(v=>bulletHtml(v,false)).join('') : '<div class="muted">Nothing rated yet.</div>'}
+      </div>
+
+      ${criteria.length ? `
+      <div class="tree-report-section-title" style="border:none; margin:14px 0 6px;">MYP Criteria</div>
+      <table class="tree-detail-table">
+        <tr><th style="width:22%;">Criterion</th><th>This Helped Your Criteria Score</th><th>This Hurt Your Criteria Score</th></tr>
+        ${criteriaRowsHtml}
+      </table>` : ''}
+
+      <div class="tree-report-section-title" style="border:none; margin:14px 0 6px;">Final Feedback</div>
+      <div class="tree-snap-box" style="background:#f5f6f8;">
+        <div class="tree-snap-box-title">Your Next Step</div>
+        ${feedback.comment ? `<div style="white-space:pre-wrap;">${escapeHtml(feedback.comment)}</div>` : '<div class="muted">No next step written yet.</div>'}
+      </div>
+    </div>`;
+}
+
+function writingTreeDetailedPageHtml(assessment, student, feedback){
+  const tree = ensureTreeLogicShape(feedback);
+  const dotHtml = (level) => level != null ? `<span class="tree-detail-dot" style="background:${TREE_LOGIC_LEVEL_COLORS[level]};"></span>` : '';
+  const rowHtml = (schemaItem, key, target) => {
     const level = target[key];
     const note = (target.comments && target.comments[key]) || '';
-    const codes = (target.criteria && target.criteria[key]) || [];
-    if(level == null && !note && !codes.length) return '';
-    const badgeHtml = level != null
-      ? `<span class="tree-report-badge" style="background:${TREE_LOGIC_LEVEL_COLORS[level]};">${escapeHtml(schemaItem.levels[level])}</span>`
-      : '<span class="muted" style="font-size:12.5px;">No level selected</span>';
-    const noteHtml = note ? `<div class="tree-report-note">&ldquo;${escapeHtml(note)}&rdquo;</div>` : '';
-    const pillsHtml = codes.length ? `<div>${codes.map(code=>`<span class="tree-report-pill">${escapeHtml(code)}</span>`).join('')}</div>` : '';
-    return `
-      <div class="tree-report-row">
-        <div class="tree-report-label">${escapeHtml(schemaItem.label)}</div>
-        <div class="tree-report-value">${badgeHtml}${noteHtml}${pillsHtml}</div>
-      </div>`;
+    if(level == null && !note) return '';
+    const areaText = level != null ? `${escapeHtml(schemaItem.label)} &mdash; ${escapeHtml(schemaItem.levels[level])}` : escapeHtml(schemaItem.label);
+    return `<tr><td>${dotHtml(level)}${areaText}</td><td>${escapeHtml(note)}</td></tr>`;
   };
-  const sectionHtml = (label, rowsHtml) => rowsHtml.trim()
-    ? `<div class="tree-report-section"><div class="tree-report-section-title">${escapeHtml(label)}</div>${rowsHtml}</div>`
+  const tableHtml = (rowsHtml) => rowsHtml.trim()
+    ? `<table class="tree-detail-table"><tr><th style="width:32%;">Area</th><th>Feedback</th></tr>${rowsHtml}</table>`
     : '';
 
-  const introRows = Object.entries(TREE_LOGIC_SCHEMA.intro.items).map(([key,item])=> itemLineHtml(item, key, tree.intro)).join('')
-    + (tree.intro.other ? `<div class="tree-report-row"><div class="tree-report-label">Other</div><div class="tree-report-value">${escapeHtml(tree.intro.other)}</div></div>` : '');
+  const introRows = Object.entries(TREE_LOGIC_SCHEMA.intro.items).map(([key,item])=> rowHtml(item, key, tree.intro)).join('')
+    + (tree.intro.other ? `<tr><td>Other</td><td>${escapeHtml(tree.intro.other)}</td></tr>` : '');
 
-  const bodyRows = tree.body.paragraphs.map((p,i)=>{
+  const bodySectionsHtml = tree.body.paragraphs.map((p,i)=>{
     const rows = Object.entries(TREE_LOGIC_SCHEMA.body.perParagraphItems).map(([key,item])=>{
-      if(item.skippable && p.linkSkipped) return `
-        <div class="tree-report-row"><div class="tree-report-label">${escapeHtml(item.label)}</div><div class="tree-report-value muted">Not Applicable</div></div>`;
-      return itemLineHtml(item, key, p);
+      if(item.skippable && p.linkSkipped) return `<tr><td>${escapeHtml(item.label)}</td><td class="muted">Not Applicable</td></tr>`;
+      return rowHtml(item, key, p);
     }).join('');
-    return rows.trim() ? `<div class="tree-report-paragraph"><div class="tree-report-paragraph-label">Paragraph ${i+1}</div>${rows}</div>` : '';
+    return rows.trim() ? `
+      <div class="tree-report-section-title" style="border:none; margin-top:10px;">Body &middot; Paragraph ${i+1}</div>
+      ${tableHtml(rows)}` : '';
   }).join('');
 
   const conclusionRows = tree.conclusion.skipped
-    ? '<div class="tree-report-row"><div class="tree-report-label">Conclusion</div><div class="tree-report-value muted">Not Applicable</div></div>'
-    : itemLineHtml(TREE_LOGIC_SCHEMA.conclusion.items.conclusion, 'level', tree.conclusion);
+    ? '<tr><td>Conclusion</td><td class="muted">Not Applicable</td></tr>'
+    : rowHtml(TREE_LOGIC_SCHEMA.conclusion.items.conclusion, 'level', tree.conclusion);
 
-  const overallRows = Object.entries(TREE_LOGIC_SCHEMA.overall.items).map(([key,item])=> itemLineHtml(item, key, tree.overall)).join('');
+  const overallRows = Object.entries(TREE_LOGIC_SCHEMA.overall.items).map(([key,item])=> rowHtml(item, key, tree.overall)).join('');
 
   return `
-    <h3>${escapeHtml(assessment.title)}</h3>
-    <div class="muted" style="margin-bottom:10px;">${escapeHtml(student.name)} &middot; Due ${formatDateNice(assessment.dueDate)}</div>
-    ${assessment.prompt ? `<div class="card" style="margin-bottom:14px;"><em>${escapeHtml(assessment.prompt)}</em></div>` : ''}
-    ${sectionHtml('Intro', introRows)}
-    ${sectionHtml('Body', bodyRows)}
-    ${sectionHtml('Conclusion', conclusionRows)}
-    ${sectionHtml('Overall', overallRows)}
-    ${feedback.comment ? `<div class="tree-report-section"><div class="tree-report-section-title">Comments</div><p style="margin:0;">${escapeHtml(feedback.comment)}</p></div>` : ''}
-  `;
+    <div class="wa-print-page tree-report-page">
+      <h2 style="margin:0 0 2px;">Detailed Feedback</h2>
+      <div class="muted" style="margin-bottom:12px;">Read from top to bottom. Colored dots show achievement level only; Criteria tags are intentionally left off this page.</div>
+
+      <div class="tree-report-section-title" style="border:none;">Introduction</div>
+      ${tableHtml(introRows)}
+
+      ${bodySectionsHtml}
+
+      ${conclusionRows.trim() ? `<div class="tree-report-section-title" style="border:none; margin-top:10px;">Conclusion</div>${tableHtml(conclusionRows)}` : ''}
+      ${overallRows.trim() ? `<div class="tree-report-section-title" style="border:none; margin-top:10px;">Overall</div>${tableHtml(overallRows)}` : ''}
+    </div>`;
+}
+
+function writingTreeReportContentHtml(assessment, student, feedback, tally){
+  return writingTreeSnapshotPageHtml(assessment, student, feedback) + writingTreeDetailedPageHtml(assessment, student, feedback);
 }
 /* ============ WRITING ASSESSMENT: rendering ============ */
 function writingReportContentHtml(assessment, student, feedback, tally){
@@ -3467,7 +3609,112 @@ function writingAggCountBadgeHtml(x, denominator){
   return `<span class="muted">${countText}</span>${extra}`;
 }
 
+/* ============ Tree Logic (I&S MYP / Language and Literature MYP) data aggregation ============
+   The flat skill-tap functions above scan `writingEvents`, which Tree Logic assessments never
+   write to (every rating lives inside writingFeedback.tree instead) -- that's why I&S/Lang Lit
+   never showed anything on the old Data tab. This is the Tree Logic equivalent: same prevalence
+   philosophy (each skill counts at most once per student per assessment, already guaranteed here
+   since collapseTreeVerdict folds every paragraph into one verdict), but tallied by TIER
+   (Green/Yellow/Orange/Red) instead of a flat positive/negative count, per Mike's rule --
+   Green = primary success, Yellow = secondary ("meets expectations") success, Red = priority
+   challenge, Orange = secondary challenge.
+   `opts.studentId` scopes to one student, `opts.assessmentId` to one assessment, `opts.writingType`
+   to one task type (the "By Task Type" view) -- any combination of these may be passed. */
+const TREE_LOGIC_SUBJECTS = ['Individuals and Societies MYP', 'Language and Literature MYP'];
+async function computeTreeSkillTally(classId, subject, opts){
+  opts = opts || {};
+  let assessments = (await dbGetAllByIndex('writingAssessments','classId', classId))
+    .filter(a=>a.subject===subject)
+    .sort((a,b)=> (a.dueDate||'').localeCompare(b.dueDate||'') || a.createdAt - b.createdAt);
+  if(opts.assessmentId) assessments = assessments.filter(a=>a.id===opts.assessmentId);
+  if(opts.writingType) assessments = assessments.filter(a=>a.writingType===opts.writingType);
+
+  const students = opts.studentId
+    ? [{ id: opts.studentId }]
+    : (await dbGetAllByIndex('students','classId', classId)).filter(s=>s.active!==false);
+
+  const tally = {}; // skillKey -> {label, green, yellow, orange, red}
+  const perStudentTotals = {};
+  students.forEach(s=> perStudentTotals[s.id] = { green:0, yellow:0, orange:0, red:0 });
+  const trend = []; // one entry per assessment, for a chart or a chronological list
+
+  for(const a of assessments){
+    let aGreen=0, aYellow=0, aOrange=0, aRed=0, aStudentsRated=0;
+    for(const s of students){
+      const feedback = await getWritingFeedbackRecord(a.id, s.id);
+      if(!feedback || !feedback.tree) continue; // never opened for this student -- nothing to count
+      const verdicts = computeTreeVerdicts(feedback.tree);
+      if(!verdicts.length) continue;
+      aStudentsRated++;
+      verdicts.forEach(v=>{
+        if(!tally[v.key]) tally[v.key] = { label: v.label, green:0, yellow:0, orange:0, red:0 };
+        tally[v.key][v.tier]++;
+        perStudentTotals[s.id][v.tier]++;
+        if(v.tier==='green') aGreen++; else if(v.tier==='yellow') aYellow++; else if(v.tier==='orange') aOrange++; else aRed++;
+      });
+    }
+    trend.push({ assessmentId:a.id, title:a.title, dueDate:a.dueDate, writingType:a.writingType, green:aGreen, yellow:aYellow, orange:aOrange, red:aRed, studentsRated:aStudentsRated });
+  }
+
+  const denominator = trend.reduce((sum,t)=>sum+t.studentsRated, 0);
+  return { tally, assessments, trend, perStudentTotals, students, denominator };
+}
+// Green desc then Yellow desc for successes; Red desc then Orange desc for challenges -- same
+// severity-first idea as the report's Top4/Bottom4, just tallied across many assessments instead
+// of many paragraphs.
+function rankTreeTally(tally, positive){
+  return Object.entries(tally)
+    .map(([key,t])=>({ key, label:t.label, green:t.green, yellow:t.yellow, orange:t.orange, red:t.red }))
+    .filter(t=> positive ? (t.green>0 || t.yellow>0) : (t.red>0 || t.orange>0))
+    .sort((a,b)=> positive
+      ? (b.green-a.green || b.yellow-a.yellow || a.label.localeCompare(b.label))
+      : (b.red-a.red || b.orange-a.orange || a.label.localeCompare(b.label)));
+}
+function topTreeWithTies(ranked, positive, n){
+  if(ranked.length <= n) return ranked.slice();
+  const keyOf = t => positive ? [t.green,t.yellow] : [t.red,t.orange];
+  const cutoff = keyOf(ranked[n-1]);
+  let end = n;
+  while(end < ranked.length){
+    const k = keyOf(ranked[end]);
+    if(k[0]===cutoff[0] && k[1]===cutoff[1]) end++; else break;
+  }
+  return ranked.slice(0, end);
+}
+function treeAggRowHtml(t, positive, denominator){
+  const primary = positive ? t.green : t.red;
+  const secondary = positive ? t.yellow : t.orange;
+  const primaryColor = positive ? TREE_LOGIC_LEVEL_COLORS[3] : TREE_LOGIC_LEVEL_COLORS[0];
+  const secondaryColor = positive ? TREE_LOGIC_LEVEL_COLORS[2] : TREE_LOGIC_LEVEL_COLORS[1];
+  return `
+    <div class="row between" style="padding:6px 0; border-bottom:1px solid var(--line);">
+      <span>${escapeHtml(t.label)}</span>
+      <span class="muted">
+        <span style="color:${primaryColor}; font-weight:700;">${primary}${denominator?` of ${denominator}`:''}</span>
+        ${secondary ? ` <span style="color:${secondaryColor};">(+${secondary} secondary)</span>` : ''}
+      </span>
+    </div>`;
+}
+function treeAggListHtml(ranked, positive, denominator, emptyText){
+  if(!ranked.length) return `<div class="empty">${escapeHtml(emptyText)}</div>`;
+  return ranked.map(t=>treeAggRowHtml(t, positive, denominator)).join('');
+}
+
 async function renderWritingDataView(){
+  if(!state.writingDataSubjectScope) state.writingDataSubjectScope = 'legacy';
+  const subjectPickerHtml = `
+    <div class="field" style="max-width:340px;">
+      <label>Subject</label>
+      <select id="writing-data-subject-select">
+        <option value="legacy" ${state.writingDataSubjectScope==='legacy'?'selected':''}>All Assessments (Skill Tap / Criteria)</option>
+        ${TREE_LOGIC_SUBJECTS.map(s=>`<option value="${escapeHtml(s)}" ${state.writingDataSubjectScope===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}
+      </select>
+    </div>`;
+
+  if(state.writingDataSubjectScope !== 'legacy'){
+    return subjectPickerHtml + await renderTreeLogicDataView(state.writingDataSubjectScope);
+  }
+
   const subTabs = `
     <div class="row" style="margin-bottom:14px;">
       <button class="btn small ${state.writingDataView==='student'?'primary':''}" data-writing-dataview="student">Student Data</button>
@@ -3476,7 +3723,162 @@ async function renderWritingDataView(){
   const body = state.writingDataView==='class'
     ? await renderWritingClassData()
     : await renderWritingStudentData();
+  return subjectPickerHtml + subTabs + body;
+}
+
+/* ---- Tree Logic Data view: Student Data / Class Data / By Task Type ---- */
+async function renderTreeLogicDataView(subject){
+  if(!['student','class','tasktype'].includes(state.writingDataView)) state.writingDataView = 'student';
+  const subTabs = `
+    <div class="row" style="margin:14px 0;">
+      <button class="btn small ${state.writingDataView==='student'?'primary':''}" data-writing-dataview="student">Student Data</button>
+      <button class="btn small ${state.writingDataView==='class'?'primary':''}" data-writing-dataview="class">Class Data</button>
+      <button class="btn small ${state.writingDataView==='tasktype'?'primary':''}" data-writing-dataview="tasktype">By Task Type</button>
+    </div>`;
+  let body;
+  if(state.writingDataView==='class') body = await renderTreeClassData(subject);
+  else if(state.writingDataView==='tasktype') body = await renderTreeTaskTypeData(subject);
+  else body = await renderTreeStudentData(subject);
   return subTabs + body;
+}
+
+async function renderTreeStudentData(subject){
+  const students = (await dbGetAllByIndex('students','classId', state.currentClassId))
+    .filter(s=>s.active!==false).sort((a,b)=>a.name.localeCompare(b.name));
+  if(!students.length) return `<div class="empty">No students yet.</div>`;
+  if(!state.writingDataSelectedStudentId || !students.find(s=>s.id===state.writingDataSelectedStudentId)){
+    state.writingDataSelectedStudentId = students[0].id;
+  }
+  const selectHtml = `<select id="writing-data-student-select" style="max-width:280px; margin-bottom:14px;">
+    ${students.map(s=>`<option value="${s.id}" ${s.id===state.writingDataSelectedStudentId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}
+  </select>`;
+
+  const { tally, assessments, denominator } = await computeTreeSkillTally(state.currentClassId, subject, { studentId: state.writingDataSelectedStudentId });
+  const posRanked = topTreeWithTies(rankTreeTally(tally, true), true, 4);
+  const negRanked = topTreeWithTies(rankTreeTally(tally, false), false, 4);
+
+  // Jumps straight to that student's Snapshot/Detailed report for this assessment -- more useful
+  // here than a bare tally drilldown, since the report already has the full picture.
+  const assessmentListHtml = assessments.length
+    ? assessments.map(a=>`<div class="card clickable" data-tree-data-open-report="${a.id}"><strong>${escapeHtml(a.title)}</strong> <span class="muted">&middot; ${escapeHtml(a.writingType||'')} &middot; Due ${formatDateNice(a.dueDate)}</span></div>`).join('')
+    : `<div class="empty">No ${escapeHtml(subject)} assessments logged yet.</div>`;
+
+  return `
+    ${selectHtml}
+    <div class="card">
+      <h4 style="color:var(--good); margin-top:0;">Top Successes</h4>
+      ${treeAggListHtml(posRanked, true, denominator, 'Nothing rated yet.')}
+    </div>
+    <div class="card" style="margin-top:14px;">
+      <h4 style="color:var(--bad); margin-top:0;">Top Challenges</h4>
+      ${treeAggListHtml(negRanked, false, denominator, 'Nothing rated yet.')}
+    </div>
+    <h4 style="margin-top:18px;">Individual Assessments</h4>
+    ${assessmentListHtml}
+  `;
+}
+
+async function renderTreeClassData(subject){
+  const { tally, trend, perStudentTotals, students, denominator } = await computeTreeSkillTally(state.currentClassId, subject, {});
+  const posRanked = topTreeWithTies(rankTreeTally(tally, true), true, 4);
+  const negRanked = topTreeWithTies(rankTreeTally(tally, false), false, 4);
+
+  const scatterHtml = students.length
+    ? students.map(s=>{
+        const t = perStudentTotals[s.id];
+        return `<div class="row between" style="padding:4px 0; border-bottom:1px solid var(--line);">
+          <span>${escapeHtml(s.name)}</span>
+          <span class="muted">
+            <span style="color:${TREE_LOGIC_LEVEL_COLORS[3]};">${t.green}g</span> /
+            <span style="color:${TREE_LOGIC_LEVEL_COLORS[2]};">${t.yellow}y</span> /
+            <span style="color:${TREE_LOGIC_LEVEL_COLORS[1]};">${t.orange}o</span> /
+            <span style="color:${TREE_LOGIC_LEVEL_COLORS[0]};">${t.red}r</span>
+          </span>
+        </div>`;
+      }).join('')
+    : `<div class="empty">No students yet.</div>`;
+
+  const trendHtml = trend.length
+    ? trend.map(t=>`<div class="row between" style="padding:4px 0; border-bottom:1px solid var(--line);">
+        <span>${escapeHtml(t.title)} <span class="muted">&middot; Due ${formatDateNice(t.dueDate)}</span></span>
+        <span class="muted">
+          <span style="color:${TREE_LOGIC_LEVEL_COLORS[3]};">${t.green}g</span> /
+          <span style="color:${TREE_LOGIC_LEVEL_COLORS[2]};">${t.yellow}y</span> /
+          <span style="color:${TREE_LOGIC_LEVEL_COLORS[1]};">${t.orange}o</span> /
+          <span style="color:${TREE_LOGIC_LEVEL_COLORS[0]};">${t.red}r</span>
+        </span>
+      </div>`).join('')
+    : `<div class="empty">No ${escapeHtml(subject)} assessments logged yet.</div>`;
+
+  return `
+    <div class="card">
+      <h4 style="color:var(--good); margin-top:0;">Top Successes</h4>
+      ${treeAggListHtml(posRanked, true, denominator, 'Nothing rated yet.')}
+    </div>
+    <div class="card" style="margin-top:14px;">
+      <h4 style="color:var(--bad); margin-top:0;">Top Challenges</h4>
+      ${treeAggListHtml(negRanked, false, denominator, 'Nothing rated yet.')}
+    </div>
+    <h4 style="margin-top:18px;">Per Assessment</h4>
+    <div class="card">${trendHtml}</div>
+    <h4 style="margin-top:18px;">Per Student</h4>
+    <div class="card">${scatterHtml}</div>
+  `;
+}
+
+async function renderTreeTaskTypeData(subject){
+  const taskTypes = subject === 'Language and Literature MYP' ? LANG_LIT_MYP_PAPERS : IS_WRITING_TYPES;
+  if(!state.writingDataTaskType || !taskTypes.includes(state.writingDataTaskType)) state.writingDataTaskType = taskTypes[0];
+  const taskTypeSelectHtml = `<select id="writing-data-tasktype-select" style="max-width:280px; margin-bottom:14px;">
+    ${taskTypes.map(t=>`<option value="${escapeHtml(t)}" ${state.writingDataTaskType===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}
+  </select>`;
+
+  const students = (await dbGetAllByIndex('students','classId', state.currentClassId))
+    .filter(s=>s.active!==false).sort((a,b)=>a.name.localeCompare(b.name));
+  if(!state.writingDataSelectedStudentId || !students.find(s=>s.id===state.writingDataSelectedStudentId)){
+    if(students.length) state.writingDataSelectedStudentId = students[0].id;
+  }
+  const studentSelectHtml = students.length ? `<select id="writing-data-tasktype-student-select" style="max-width:280px; margin-bottom:14px;">
+    ${students.map(s=>`<option value="${s.id}" ${s.id===state.writingDataSelectedStudentId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}
+  </select>` : '';
+
+  // ---- Panel 1: this one student's trend across every assessment of this task type ----
+  const studentTally = students.length
+    ? await computeTreeSkillTally(state.currentClassId, subject, { studentId: state.writingDataSelectedStudentId, writingType: state.writingDataTaskType })
+    : { trend: [] };
+  const studentTrendHtml = studentTally.trend.length
+    ? studentTally.trend.map(t=>`<div class="row between" style="padding:4px 0; border-bottom:1px solid var(--line);">
+        <span>${escapeHtml(t.title)} <span class="muted">&middot; Due ${formatDateNice(t.dueDate)}</span></span>
+        <span class="muted">
+          <span style="color:${TREE_LOGIC_LEVEL_COLORS[3]};">${t.green}g</span> /
+          <span style="color:${TREE_LOGIC_LEVEL_COLORS[2]};">${t.yellow}y</span> /
+          <span style="color:${TREE_LOGIC_LEVEL_COLORS[1]};">${t.orange}o</span> /
+          <span style="color:${TREE_LOGIC_LEVEL_COLORS[0]};">${t.red}r</span>
+        </span>
+      </div>`).join('')
+    : `<div class="empty">No ${escapeHtml(state.writingDataTaskType)} assessments logged for this student yet.</div>`;
+
+  // ---- Panel 2: the whole class/grade's spread on this task type ----
+  const classTally = await computeTreeSkillTally(state.currentClassId, subject, { writingType: state.writingDataTaskType });
+  const classPosRanked = topTreeWithTies(rankTreeTally(classTally.tally, true), true, 4);
+  const classNegRanked = topTreeWithTies(rankTreeTally(classTally.tally, false), false, 4);
+
+  return `
+    ${taskTypeSelectHtml}
+    <h4 style="margin-top:6px;">This Student's Trend</h4>
+    ${studentSelectHtml}
+    <div class="card">${studentTrendHtml}</div>
+
+    <h4 style="margin-top:22px;">Class Spread on ${escapeHtml(state.writingDataTaskType)}</h4>
+    <div class="card">
+      <h4 style="color:var(--good); margin-top:0;">Top Successes</h4>
+      ${treeAggListHtml(classPosRanked, true, classTally.denominator, 'Nothing rated yet.')}
+    </div>
+    <div class="card" style="margin-top:14px;">
+      <h4 style="color:var(--bad); margin-top:0;">Top Challenges</h4>
+      ${treeAggListHtml(classNegRanked, false, classTally.denominator, 'Nothing rated yet.')}
+    </div>
+  `;
 }
 
 async function renderWritingStudentData(){
@@ -4711,7 +5113,11 @@ async function exportSingleWritingReport(assessmentId, studentId){
   const student = await dbGet('students', studentId);
   const feedback = await getOrCreateWritingFeedbackRecord(assessmentId, state.currentClassId, studentId);
   const tally = await computeWritingTally(assessmentId, studentId);
-  getPrintArea().innerHTML = `<div class="wa-print-page">${writingReportContentHtml(assessment, student, feedback, tally)}</div>`;
+  // Tree Logic reports already come back as two self-contained .wa-print-page divs (Snapshot +
+  // Detailed) -- wrapping them in a third outer page div would just add a blank trailing page.
+  getPrintArea().innerHTML = usesTreeLogic(assessment)
+    ? writingReportContentHtml(assessment, student, feedback, tally)
+    : `<div class="wa-print-page">${writingReportContentHtml(assessment, student, feedback, tally)}</div>`;
   window.print();
 }
 async function exportAllWritingReports(assessmentId){
@@ -4723,7 +5129,9 @@ async function exportAllWritingReports(assessmentId){
     const feedback = await getWritingFeedbackRecord(assessmentId, s.id);
     if(!feedback || !feedback.submittedAt) continue;
     const tally = await computeWritingTally(assessmentId, s.id);
-    parts.push(`<div class="wa-print-page">${writingReportContentHtml(assessment, s, feedback, tally)}</div>`);
+    parts.push(usesTreeLogic(assessment)
+      ? writingReportContentHtml(assessment, s, feedback, tally)
+      : `<div class="wa-print-page">${writingReportContentHtml(assessment, s, feedback, tally)}</div>`);
   }
   if(parts.length===0){ toast('No submitted reports yet to export'); return; }
   getPrintArea().innerHTML = parts.join('');
@@ -4792,8 +5200,9 @@ function wireWritingTabEvents(){
   });
   document.querySelectorAll('[data-writing-dataview]').forEach(el=>{
     el.addEventListener('click', ()=>{
-      state.writingDataView = el.getAttribute('data-writing-dataview')==='class' ? 'class' : 'student';
-      state.writingDataSelectedAssessmentId = null; // switching Student/Class starts back at the overview
+      const v = el.getAttribute('data-writing-dataview');
+      state.writingDataView = (v==='class' || v==='tasktype') ? v : 'student';
+      state.writingDataSelectedAssessmentId = null; // switching sub-tabs starts back at the overview
       render();
     });
   });
@@ -4806,6 +5215,37 @@ function wireWritingTabEvents(){
   document.querySelectorAll('[data-writing-data-open-assessment]').forEach(el=>{
     el.addEventListener('click', ()=>{
       state.writingDataSelectedAssessmentId = el.getAttribute('data-writing-data-open-assessment');
+      render();
+    });
+  });
+
+  // ---- Tree Logic (I&S / Language and Literature MYP) Data view ----
+  const subjectSelect = document.getElementById('writing-data-subject-select');
+  if(subjectSelect) subjectSelect.addEventListener('change', ()=>{
+    state.writingDataSubjectScope = subjectSelect.value;
+    state.writingDataView = 'student';
+    state.writingDataSelectedAssessmentId = null;
+    state.writingDataTaskType = null;
+    render();
+  });
+  const taskTypeSelect = document.getElementById('writing-data-tasktype-select');
+  if(taskTypeSelect) taskTypeSelect.addEventListener('change', ()=>{
+    state.writingDataTaskType = taskTypeSelect.value;
+    render();
+  });
+  const taskTypeStudentSelect = document.getElementById('writing-data-tasktype-student-select');
+  if(taskTypeStudentSelect) taskTypeStudentSelect.addEventListener('change', ()=>{
+    state.writingDataSelectedStudentId = taskTypeStudentSelect.value;
+    render();
+  });
+  // Jumps to that student's Tree Logic report (Snapshot + Detailed) for the clicked assessment,
+  // rather than a bare tally drilldown -- the report already has the full picture.
+  document.querySelectorAll('[data-tree-data-open-report]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      state.writingSelectedAssessmentId = el.getAttribute('data-tree-data-open-report');
+      state.writingSelectedStudentId = state.writingDataSelectedStudentId;
+      state.writingView = 'student';
+      state.writingStudentMode = 'report';
       render();
     });
   });
