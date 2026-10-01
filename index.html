@@ -679,7 +679,7 @@ const TREE_LOGIC_SCHEMA = {
   intro: {
     label: 'Intro',
     items: {
-      point: { label: 'Point', levels: ['No Opening Point', 'Weak Point', 'Solid Point', 'Great Point'] },
+      point: { label: 'Point (Intro)', levels: ['No Opening Point', 'Weak Point', 'Solid Point', 'Great Point'] },
       context: { label: 'Establishes Context / Debate', levels: ['Does Not Establish', 'Somewhat Establishes', 'Mostly Establishes', 'Clearly Established'] },
       thesis: { label: 'Thesis', levels: ['No Thesis', 'Weak / Confusing / Poorly Placed', 'Solid Thesis', 'Strong Thesis'] }
     },
@@ -688,7 +688,7 @@ const TREE_LOGIC_SCHEMA = {
   body: {
     label: 'Body',
     perParagraphItems: {
-      point: { label: 'Point', levels: ['No Point Given', 'Confusing / Weak Point', 'Point Given', 'Strong Point Given'] },
+      point: { label: 'Point (Body)', levels: ['No Point Given', 'Confusing / Weak Point', 'Point Given', 'Strong Point Given'] },
       evidence: { label: 'Example / Evidence / Quote', levels: ['No Evidence Given', 'Evidence Given', 'Suitable Evidence Given', 'Strong Evidence Given'] },
       analysis: { label: 'Explanation / Analysis', levels: ['No Analysis Given', 'Illogical / Weak / Confusing Analysis', 'Basic Analysis Given', 'Deep / Strong Analysis Given'] },
       link: { label: 'Link Back to Thesis', levels: ['No Link to Thesis', 'Weak Link to Thesis', 'Links to Thesis', 'Strong Link to Thesis'], skippable: true },
@@ -3334,17 +3334,23 @@ function writingTreeSnapshotPageHtml(assessment, student, feedback){
   const bottom = pickTreeTopN(verdicts, false, 4);
   const criteria = (assessment.subjectMeta && assessment.subjectMeta.criteria) || [];
 
-  // Top4 headlines with the achievement LEVEL text ("Strong Thesis") -- naming the win.
-  // Bottom4 headlines with the ITEM name ("Analysis") -- naming the area to work on.
+  // Top4 headlines lead with the achievement LEVEL text ("Strong Thesis") -- naming the win.
+  // Bottom4 headlines lead with the ITEM name ("Analysis") -- naming the area to work on.
+  // Several items share the exact same generic 4-level scale (Comprehension and Grammar both use
+  // Below/Approaching/Meeting Expectations/Beyond), so a level-text-only headline is genuinely
+  // ambiguous for those -- always tack on the item name in muted parentheses to disambiguate.
   const bulletHtml = (v, useLevelAsHeadline) => {
-    const headline = useLevelAsHeadline ? v.levelText : v.label;
+    const headline = useLevelAsHeadline
+      ? `${escapeHtml(v.levelText)} <span class="muted" style="font-weight:400;">(${escapeHtml(v.label)})</span>`
+      : escapeHtml(v.label);
     const tagHtml = v.criteriaCodes.length ? ` <span class="tree-snap-tag">[${v.criteriaCodes.map(escapeHtml).join(', ')}]</span>` : '';
     const commentHtml = v.comment ? ` &mdash; ${escapeHtml(v.comment)}` : '';
-    return `<div class="tree-snap-bullet">&bull; <strong>${escapeHtml(headline)}</strong>${commentHtml}${tagHtml}</div>`;
+    return `<div class="tree-snap-bullet">&bull; <strong>${headline}</strong>${commentHtml}${tagHtml}</div>`;
   };
 
+  // Same ambiguity applies here: pair each level text with the item it came from.
   const criteriaRowsHtml = criteria.map(c=>{
-    const helped = pickTreeTopN(verdicts.filter(v=>v.criteriaCodes.includes(c.code)), true, 99).map(v=>escapeHtml(v.levelText));
+    const helped = pickTreeTopN(verdicts.filter(v=>v.criteriaCodes.includes(c.code)), true, 99).map(v=>`${escapeHtml(v.label)}: ${escapeHtml(v.levelText)}`);
     const hurt = pickTreeTopN(verdicts.filter(v=>v.criteriaCodes.includes(c.code)), false, 99).map(v=>escapeHtml(v.label));
     return `
       <tr>
@@ -3365,7 +3371,7 @@ function writingTreeSnapshotPageHtml(assessment, student, feedback){
         ${top.length ? top.map(v=>bulletHtml(v,true)).join('') : '<div class="muted">Nothing rated yet.</div>'}
       </div>
       <div class="tree-snap-box negative">
-        <div class="tree-snap-box-title">What Hurt Your Performance</div>
+        <div class="tree-snap-box-title">What Needs Improvement</div>
         ${bottom.length ? bottom.map(v=>bulletHtml(v,false)).join('') : '<div class="muted">Nothing rated yet.</div>'}
       </div>
 
@@ -3773,6 +3779,10 @@ async function renderTreeStudentData(subject){
       <h4 style="color:var(--bad); margin-top:0;">Top Challenges</h4>
       ${treeAggListHtml(negRanked, false, denominator, 'Nothing rated yet.')}
     </div>
+    <div class="grid-cards" style="margin-top:14px;">
+      <div class="card"><canvas id="tree-student-pos-pie" style="max-height:260px;"></canvas></div>
+      <div class="card"><canvas id="tree-student-neg-pie" style="max-height:260px;"></canvas></div>
+    </div>
     <h4 style="margin-top:18px;">Individual Assessments</h4>
     ${assessmentListHtml}
   `;
@@ -3819,6 +3829,8 @@ async function renderTreeClassData(subject){
       <h4 style="color:var(--bad); margin-top:0;">Top Challenges</h4>
       ${treeAggListHtml(negRanked, false, denominator, 'Nothing rated yet.')}
     </div>
+    <div class="card" style="margin-top:14px;"><canvas id="tree-class-trend" style="max-height:280px;"></canvas></div>
+    <div class="card" style="margin-top:14px;"><canvas id="tree-class-scatter" style="max-height:320px;"></canvas></div>
     <h4 style="margin-top:18px;">Per Assessment</h4>
     <div class="card">${trendHtml}</div>
     <h4 style="margin-top:18px;">Per Student</h4>
@@ -4039,6 +4051,59 @@ async function mountWritingCharts(){
         options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{position:'bottom'} }, scales:{ y:{ beginAtZero:true } } }
       });
     }
+  }
+}
+
+// Tree Logic's version of the above: a skill's "count" is really Green+Yellow (successes) or
+// Red+Orange (challenges), not a single tap tally, so these get their own small pie-chart mount
+// and trend/scatter builders rather than reusing the flat-taxonomy ones directly.
+function mountTreePieChart(canvasId, ranked, positive, title){
+  const canvas = document.getElementById(canvasId);
+  if(!canvas) return;
+  const top = ranked.slice(0,6);
+  if(!top.length) return;
+  new Chart(canvas, {
+    type:'pie',
+    data:{ labels: top.map(x=>x.label), datasets:[{ data: top.map(x=> positive ? (x.green+x.yellow) : (x.red+x.orange)), backgroundColor: WRITING_PIE_PALETTE }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{position:'bottom', labels:{boxWidth:12, font:{size:11}}}, title:{display:true, text:title} } }
+  });
+}
+async function mountTreeLogicCharts(subject){
+  if(typeof Chart === 'undefined') return; // CDN chart lib unavailable (offline, blocked, or a test harness)
+  if(state.writingDataView === 'class'){
+    const { trend, perStudentTotals, students } = await computeTreeSkillTally(state.currentClassId, subject, {});
+    const trendCanvas = document.getElementById('tree-class-trend');
+    if(trendCanvas && trend.length){
+      new Chart(trendCanvas, {
+        type:'line',
+        data:{ labels: trend.map(t=>t.title), datasets:[
+          { label:'Avg Successes / Student (Green+Yellow)', data: trend.map(t=> t.studentsRated ? (t.green+t.yellow)/t.studentsRated : 0), borderColor:'#2e9e5b', backgroundColor:'#2e9e5b', tension:0.25 },
+          { label:'Avg Challenges / Student (Red+Orange)', data: trend.map(t=> t.studentsRated ? (t.red+t.orange)/t.studentsRated : 0), borderColor:'#d64545', backgroundColor:'#d64545', tension:0.25 }
+        ]},
+        options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{position:'bottom'} }, scales:{ y:{ beginAtZero:true, ticks:{ stepSize:0.5 } } } }
+      });
+    }
+    const scatterCanvas = document.getElementById('tree-class-scatter');
+    const scatterPoints = students
+      .map(s=>({ name:s.name, firstName:s.name.split(' ')[0], pos: perStudentTotals[s.id].green+perStudentTotals[s.id].yellow, neg: perStudentTotals[s.id].red+perStudentTotals[s.id].orange }))
+      .filter(p=> p.pos>0 || p.neg>0);
+    if(scatterCanvas && scatterPoints.length){
+      const hasDatalabels = typeof ChartDataLabels !== 'undefined';
+      new Chart(scatterCanvas, {
+        type:'scatter',
+        data:{ datasets:[{ label:'Students', data: scatterPoints.map(p=>({x:p.pos, y:p.neg, label:p.firstName})), backgroundColor:'#4a6fa5' }] },
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{ display:false }, title:{display:true, text:'Successes vs. Challenges per Student'}, datalabels: hasDatalabels ? { align:'top', formatter:(v)=>v.label, font:{size:10} } : false },
+          scales:{ x:{ title:{display:true, text:'Successes (Green+Yellow)'}, beginAtZero:true }, y:{ title:{display:true, text:'Challenges (Red+Orange)'}, beginAtZero:true } }
+        },
+        plugins: hasDatalabels ? [ChartDataLabels] : []
+      });
+    }
+  } else if(state.writingDataView === 'student'){
+    const { tally } = await computeTreeSkillTally(state.currentClassId, subject, { studentId: state.writingDataSelectedStudentId });
+    mountTreePieChart('tree-student-pos-pie', rankTreeTally(tally, true), true, 'Successes');
+    mountTreePieChart('tree-student-neg-pie', rankTreeTally(tally, false), false, 'Challenges');
   }
 }
 
@@ -5267,7 +5332,10 @@ function wireWritingTabEvents(){
   // Charts mount into <canvas> elements already in the DOM at this point (render() sets
   // innerHTML before calling the wire*Events functions) -- fire-and-forget is fine since this
   // just re-derives the same aggregate data the HTML above was built from.
-  if(state.writingView === 'data') mountWritingCharts();
+  if(state.writingView === 'data'){
+    if(state.writingDataSubjectScope && state.writingDataSubjectScope !== 'legacy') mountTreeLogicCharts(state.writingDataSubjectScope);
+    else mountWritingCharts();
+  }
 
   const exportAllBtn = document.getElementById('export-all-writing-btn');
   if(exportAllBtn) exportAllBtn.addEventListener('click', ()=> exportAllWritingReports(state.writingSelectedAssessmentId));
