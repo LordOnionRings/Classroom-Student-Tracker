@@ -2910,7 +2910,10 @@ async function buildWritingDataExportBundle(classId){
   for(const s of students){
     const events = (await dbGetAllByIndex('writingEvents','studentId', s.id)).filter(e=>e.classId===classId);
     const feedbackAll = (await dbGetAllByIndex('writingFeedback','studentId', s.id)).filter(f=>f.classId===classId);
-    const hasFeedbackContent = (f)=> !!(f.comment && f.comment.trim()) || !!(f.scores && (f.scores.dp!=null || f.scores.myp!=null || f.scores.level!=null || (f.scores.criteria && Object.values(f.scores.criteria).some(v=>v!=null))));
+    // Tree Logic (I&S / Language and Literature MYP) feedback never touches comment/scores at
+    // all -- every rating lives in `f.tree` -- so a record with only Tree Logic ratings and no
+    // comment yet used to get silently filtered out here entirely.
+    const hasFeedbackContent = (f)=> !!(f.comment && f.comment.trim()) || !!(f.scores && (f.scores.dp!=null || f.scores.myp!=null || f.scores.level!=null || (f.scores.criteria && Object.values(f.scores.criteria).some(v=>v!=null)))) || !!f.tree;
     const feedback = feedbackAll.filter(hasFeedbackContent);
     if(!events.length && !feedback.length) continue; // nothing logged for this student -- skip entirely
     for(const record of [...events, ...feedback]){
@@ -2923,7 +2926,10 @@ async function buildWritingDataExportBundle(classId){
     studentBundles.push({
       directoryId: s.directoryId, name: s.name, cohort: dirRec ? dirRec.cohort : null,
       events: events.map(e=>({ assessmentId:e.assessmentId, polarity:e.polarity, skillKey:e.skillKey, quote:e.quote||null, criteriaCodes:e.criteriaCodes, timestamp:e.timestamp })),
-      feedback: feedback.map(f=>({ assessmentId:f.assessmentId, comment:f.comment||'', scores:f.scores||{}, submittedAt:f.submittedAt||null, updatedAt:f.updatedAt||null }))
+      // `tree` carries every Tree Logic rating, note, and per-item Criteria tag -- previously
+      // dropped here entirely, which is why an exported/re-imported student kept their final
+      // comment but lost every Intro/Body/Conclusion/Overall rating.
+      feedback: feedback.map(f=>({ assessmentId:f.assessmentId, comment:f.comment||'', scores:f.scores||{}, tree:f.tree||null, submittedAt:f.submittedAt||null, updatedAt:f.updatedAt||null }))
     });
   }
   return {
@@ -3004,9 +3010,15 @@ async function importWritingDataFromDirectory(classId, bundle){
     const localStudent = byDirectoryId[sb.directoryId];
     for(const newAssessmentId of new Set(Object.values(idMap))){
       if(freshlyCreated.has(newAssessmentId)) continue; // can't have pre-existing data on a brand-new assessment
-      const already = (await dbGetAllByIndex('writingEvents','assessmentId', newAssessmentId)).some(e=>e.studentId===localStudent.id);
-      if(already) localStudent.__alreadyImported = localStudent.__alreadyImported || {};
-      if(already) localStudent.__alreadyImported[newAssessmentId] = true;
+      // Tree Logic (I&S / Language and Literature MYP) assessments never write to writingEvents
+      // at all -- checking only that table meant a re-import of the same file could duplicate a
+      // Tree Logic student's writingFeedback record every time. Check writingFeedback too.
+      const alreadyEvents = (await dbGetAllByIndex('writingEvents','assessmentId', newAssessmentId)).some(e=>e.studentId===localStudent.id);
+      const alreadyFeedback = (await dbGetAllByIndex('writingFeedback','assessmentId', newAssessmentId)).some(f=>f.studentId===localStudent.id);
+      if(alreadyEvents || alreadyFeedback){
+        localStudent.__alreadyImported = localStudent.__alreadyImported || {};
+        localStudent.__alreadyImported[newAssessmentId] = true;
+      }
     }
     for(const e of sb.events){
       const newAssessmentId = idMap[e.assessmentId];
@@ -3026,6 +3038,7 @@ async function importWritingDataFromDirectory(classId, bundle){
       await dbAdd('writingFeedback', {
         id: uuid(), assessmentId: newAssessmentId, classId, studentId: localStudent.id,
         comment: f.comment||'', scores: f.scores||{dp:null,myp:null,level:null,criteria:{}},
+        tree: f.tree||null, // Tree Logic ratings (Intro/Body/Conclusion/Overall + notes + Criteria tags)
         submittedAt: f.submittedAt||null, updatedAt: f.updatedAt||Date.now()
       });
       importedFeedback++;
@@ -3066,7 +3079,11 @@ async function computeWritingStatus(assessmentId, studentId){
     rec.scores.dp!=null || rec.scores.myp!=null || rec.scores.level!=null ||
     (rec.scores.criteria && Object.values(rec.scores.criteria).some(v=>v!=null))
   ));
-  if(events.length>0 || hasComment || hasScore) return 'in_progress';
+  // Tree Logic (I&S / Language and Literature MYP) never writes to `events` or `scores` at all --
+  // every rating lives in `rec.tree`, which is only ever persisted once a chip is actually tapped
+  // (never on a bare page visit), so its presence alone is a safe "something was entered" signal.
+  const hasTreeRatings = !!(rec && rec.tree);
+  if(events.length>0 || hasComment || hasScore || hasTreeRatings) return 'in_progress';
   return 'unassessed';
 }
 
